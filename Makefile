@@ -1,9 +1,9 @@
-CC = gcc
-CFLAGS = -O2 -Wall -Wextra
+CXX = g++
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
 INC = -Iexternal/mavlink
 
 all:
-	$(CC) $(CFLAGS) main.c -o ground_rover_daemon $(INC)
+	$(CXX) $(CXXFLAGS) main.cpp -o ground_rover_daemon $(INC)
 
 clean:
 	rm -f ground_rover_daemon
