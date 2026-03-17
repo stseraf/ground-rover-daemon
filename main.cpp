@@ -3,6 +3,8 @@
 #include <cerrno>
 #include <unistd.h>
 #include <ctime>
+#include <csignal>
+#include <atomic>
 
 #include "config.hpp"
 #include "udp_socket.hpp"
@@ -10,6 +12,8 @@
 #include "logger.hpp"
 #include "mav_sender.hpp"
 #include "command_handlers.hpp"
+
+static std::atomic<bool> running{true};
 
 /* -------------------- utils -------------------- */
 
@@ -24,6 +28,8 @@ static uint64_t micros()
 
 int main()
 {
+    std::signal(SIGINT,  [](int) { running = false; });
+    std::signal(SIGTERM, [](int) { running = false; });
     UdpSocket  sock{Config::UDP_BIND_PORT};
     RoverState state{};
     MavSender  mav{sock, Config::MAV_SYS_ID, Config::MAV_COMP_ID};
@@ -34,7 +40,7 @@ int main()
     mavlink_message_t msg;
     mavlink_status_t  status;
 
-    while (true) {
+    while (running) {
         uint8_t receive_buffer[2048];
         ssize_t n = sock.recv_nonblocking(receive_buffer, sizeof(receive_buffer),
                                           state.qgc_addr, state.qgc_addr_len);
