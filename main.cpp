@@ -1,5 +1,4 @@
 #include <cstdio>
-#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
@@ -11,6 +10,7 @@
 
 #include "udp_socket.hpp"
 #include "rover_state.hpp"
+#include "logger.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
@@ -38,39 +38,6 @@ static uint64_t micros()
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
-}
-
-void log_message(bool new_line, const char *format, ...)
-{
-    static bool last_log_same_line = false;
-    if (!new_line) {
-        std::printf("\r");
-        last_log_same_line = true;
-    }
-    else {
-        if (last_log_same_line) std::printf("\n");
-        last_log_same_line = false;
-    }
-
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    static long sec_diff = 0;
-    if (!sec_diff) {
-        sec_diff = ts.tv_sec;
-    }
-    long seconds = ts.tv_sec - sec_diff;
-    int millis = static_cast<int>(ts.tv_nsec / 1000000);
-
-    std::printf("[%05ld.%03d] ", seconds, millis);
-    if (!new_line) std::printf("*");
-
-    va_list args;
-    va_start(args, format);
-    std::vprintf(format, args);
-    va_end(args);
-
-    if (new_line) std::printf("\n");
-    std::fflush(stdout);
 }
 
 /* -------------------- MAVLink TX -------------------- */
@@ -126,7 +93,7 @@ static void send_autopilot_version(UdpSocket& sock, RoverState& state)
     | MAV_PROTOCOL_CAPABILITY_MAVLINK2;
 
     mavlink_msg_autopilot_version_encode(Config::MAV_SYS_ID, Config::MAV_COMP_ID, &msg, &av);
-    log_message(true, "tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX", (unsigned long long)av.capabilities);
+    logger::line("tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX", (unsigned long long)av.capabilities);
     mav_send(sock, state, &msg);
 }
 
@@ -157,7 +124,7 @@ static void send_available_modes(UdpSocket& sock, RoverState& state, uint32_t mo
     std::strncpy(am.mode_name, modes[mode-1].name, sizeof(am.mode_name) - 1);
 
     mavlink_msg_available_modes_encode(Config::MAV_SYS_ID, Config::MAV_COMP_ID, &msg, &am);
-    log_message(true, "tx: MAVLINK_MSG_ID_AVAILABLE_MODES(435) mode %u/%u: %s", mode, number_modes, modes[mode-1].name);
+    logger::line("tx: MAVLINK_MSG_ID_AVAILABLE_MODES(435) mode %u/%u: %s", mode, number_modes, modes[mode-1].name);
     mav_send(sock, state, &msg);
 }
 
@@ -176,7 +143,7 @@ static void send_command_ack(UdpSocket& sock, RoverState& state, uint16_t comman
         target_system,
         target_component
     );
-    log_message(true, "tx: MAVLINK_MSG_ID_COMMAND_ACK(77): command=%u result=%u", command, result);
+    logger::line("tx: MAVLINK_MSG_ID_COMMAND_ACK(77): command=%u result=%u", command, result);
     mav_send(sock, state, &ack);
 }
 
@@ -187,11 +154,11 @@ static void handle_command_long(UdpSocket& sock, RoverState& state,
 {
     if (cmd->command == MAV_CMD_COMPONENT_ARM_DISARM) {
         state.armed = (cmd->param1 > 0.5f);
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_COMPONENT_ARM_DISARM(400): Arm=%d", static_cast<uint32_t>(cmd->param1));
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_COMPONENT_ARM_DISARM(400): Arm=%d", static_cast<uint32_t>(cmd->param1));
         send_command_ack(sock, state, cmd->command, MAV_RESULT_ACCEPTED, cmd->target_system, cmd->target_component);
     }
     else if (cmd->command == MAV_CMD_REQUEST_MESSAGE) {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): ");
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): ");
 
         if (static_cast<uint32_t>(cmd->param1) == MAVLINK_MSG_ID_SYS_STATUS) {
             std::printf("MAVLINK_MSG_ID_SYS_STATUS(1) handle\n");
@@ -234,25 +201,25 @@ static void handle_command_long(UdpSocket& sock, RoverState& state,
         }
     }
     else if (cmd->command == MAV_CMD_DO_SET_MODE) {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_DO_SET_MODE(176): base_mode=0x%02X custom_mode=%u", static_cast<uint32_t>(cmd->param1), static_cast<uint32_t>(cmd->param2));
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_DO_SET_MODE(176): base_mode=0x%02X custom_mode=%u", static_cast<uint32_t>(cmd->param1), static_cast<uint32_t>(cmd->param2));
         state.base_mode   = static_cast<uint8_t>(cmd->param1);
         state.custom_mode = static_cast<uint32_t>(cmd->param2);
         send_command_ack(sock, state, cmd->command, MAV_RESULT_ACCEPTED, cmd->target_system, cmd->target_component);
     }
     else if (cmd->command == MAV_CMD_NAV_TAKEOFF) {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_NAV_TAKEOFF(22): MAV_RESULT_UNSUPPORTED");
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_NAV_TAKEOFF(22): MAV_RESULT_UNSUPPORTED");
         send_command_ack(sock, state, cmd->command, MAV_RESULT_UNSUPPORTED, cmd->target_system, cmd->target_component);
     }
     else if (cmd->command == MAV_CMD_REQUEST_CAMERA_INFORMATION) {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_CAMERA_INFORMATION(521): MAV_RESULT_UNSUPPORTED");
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_CAMERA_INFORMATION(521): MAV_RESULT_UNSUPPORTED");
         send_command_ack(sock, state, cmd->command, MAV_RESULT_UNSUPPORTED, cmd->target_system, cmd->target_component);
     }
     else if (cmd->command == MAV_CMD_MISSION_START) {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_MISSION_START(300): MAV_RESULT_UNSUPPORTED");
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_MISSION_START(300): MAV_RESULT_UNSUPPORTED");
         send_command_ack(sock, state, cmd->command, MAV_RESULT_UNSUPPORTED, cmd->target_system, cmd->target_component);
     }
     else {
-        log_message(true, "rx: MAVLINK_MSG_ID_COMMAND_LONG(76): Unknown COMMAND_LONG(%u): MAV_RESULT_UNSUPPORTED", static_cast<uint32_t>(cmd->command));
+        logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): Unknown COMMAND_LONG(%u): MAV_RESULT_UNSUPPORTED", static_cast<uint32_t>(cmd->command));
         send_command_ack(sock, state, cmd->command, MAV_RESULT_UNSUPPORTED, cmd->target_system, cmd->target_component);
     }
 }
@@ -264,7 +231,7 @@ int main()
     UdpSocket sock{Config::UDP_BIND_PORT};
     RoverState state{};
 
-    log_message(true, "MAVLink rover daemon started");
+    logger::line("MAVLink rover daemon started");
 
     uint64_t last_hb = 0;
     mavlink_message_t msg;
@@ -282,13 +249,13 @@ int main()
                         case MAVLINK_MSG_ID_HEARTBEAT: {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
-                            //log_message(true, "rx: MAVLINK_MSG_ID_HEARTBEAT(0): type=%u autopilot=%u base_mode=0x%02X", hb.type, hb.autopilot, hb.base_mode);
+                            //logger::line("rx: MAVLINK_MSG_ID_HEARTBEAT(0): type=%u autopilot=%u base_mode=0x%02X", hb.type, hb.autopilot, hb.base_mode);
                             break;
                         }
                         case MAVLINK_MSG_ID_SET_MODE: {
                             mavlink_set_mode_t sm;
                             mavlink_msg_set_mode_decode(&msg, &sm);
-                            log_message(true, "rx: MAVLINK_MSG_ID_SET_MODE(11): base=0x%02X custom=%u", sm.base_mode, sm.custom_mode);
+                            logger::line("rx: MAVLINK_MSG_ID_SET_MODE(11): base=0x%02X custom=%u", sm.base_mode, sm.custom_mode);
                             state.base_mode   = sm.base_mode;
                             state.custom_mode = sm.custom_mode;
                             break;
@@ -296,7 +263,7 @@ int main()
                         case MAVLINK_MSG_ID_MANUAL_CONTROL: {
                             mavlink_manual_control_t mc;
                             mavlink_msg_manual_control_decode(&msg, &mc);
-                            log_message(false, "rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X           ", mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                            logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X           ", mc.x, mc.y, mc.z, mc.r, mc.buttons);
                             break;
                         }
                         case MAVLINK_MSG_ID_COMMAND_LONG: {
@@ -308,26 +275,26 @@ int main()
                         case MAVLINK_MSG_ID_REQUEST_DATA_STREAM: {
                             mavlink_request_data_stream_t rds;
                             mavlink_msg_request_data_stream_decode(&msg, &rds);
-                            log_message(true, "rx: MAVLINK_MSG_ID_REQUEST_DATA_STREAM(66): req_stream_id=%u req_message_rate=%u start_stop=%u",
+                            logger::line("rx: MAVLINK_MSG_ID_REQUEST_DATA_STREAM(66): req_stream_id=%u req_message_rate=%u start_stop=%u",
                                 rds.req_stream_id, rds.req_message_rate, rds.start_stop);
                             break;
                         }
                         case MAVLINK_MSG_ID_DATA_STREAM: {
                             mavlink_data_stream_t ds;
                             mavlink_msg_data_stream_decode(&msg, &ds);
-                            log_message(true, "rx: MAVLINK_MSG_ID_DATA_STREAM(67): stream_id=%u message_rate=%u", ds.stream_id, ds.message_rate);
+                            logger::line("rx: MAVLINK_MSG_ID_DATA_STREAM(67): stream_id=%u message_rate=%u", ds.stream_id, ds.message_rate);
                             break;
                         }
                         case MAVLINK_MSG_ID_SYSTEM_TIME: {
                             mavlink_system_time_t st;
                             mavlink_msg_system_time_decode(&msg, &st);
-                            log_message(true, "rx: MAVLINK_MSG_ID_SYSTEM_TIME(2): time_unix_usec=%llu time_boot_ms=%u", (unsigned long long)st.time_unix_usec, st.time_boot_ms);
+                            logger::line("rx: MAVLINK_MSG_ID_SYSTEM_TIME(2): time_unix_usec=%llu time_boot_ms=%u", (unsigned long long)st.time_unix_usec, st.time_boot_ms);
                             break;
                         }
                         case MAVLINK_MSG_ID_MISSION_REQUEST_LIST: {
                             mavlink_mission_request_list_t mrl;
                             mavlink_msg_mission_request_list_decode(&msg, &mrl);
-                            log_message(true, "rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u", mrl.target_system, mrl.target_component);
+                            logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u", mrl.target_system, mrl.target_component);
                             {
                                 std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
                                 mavlink_message_t mc;
@@ -341,7 +308,7 @@ int main()
                                     MAV_MISSION_TYPE_MISSION,
                                     0
                                 );
-                                log_message(true, "tx: MAVLINK_MSG_ID_MISSION_COUNT(44): %u", 0);
+                                logger::line("tx: MAVLINK_MSG_ID_MISSION_COUNT(44): %u", 0);
                                 mav_send(sock, state, &mc);
                             }
                             break;
@@ -349,13 +316,13 @@ int main()
                         case MAVLINK_MSG_ID_MISSION_ACK: {
                             mavlink_mission_ack_t ma;
                             mavlink_msg_mission_ack_decode(&msg, &ma);
-                            log_message(true, "rx: MAVLINK_MSG_ID_MISSION_ACK(47): target=%u:%u type=%u", ma.target_system, ma.target_component, ma.type);
+                            logger::line("rx: MAVLINK_MSG_ID_MISSION_ACK(47): target=%u:%u type=%u", ma.target_system, ma.target_component, ma.type);
                             break;
                         }
                         case MAVLINK_MSG_ID_PARAM_REQUEST_LIST: {
                             mavlink_param_request_list_t prl;
                             mavlink_msg_param_request_list_decode(&msg, &prl);
-                            log_message(true, "rx: MAVLINK_MSG_ID_PARAM_REQUEST_LIST(21) received target=%u:%u", prl.target_system, prl.target_component);
+                            logger::line("rx: MAVLINK_MSG_ID_PARAM_REQUEST_LIST(21) received target=%u:%u", prl.target_system, prl.target_component);
                             {
                                 std::printf("MAVLINK_MSG_ID_PARAM_VALUE(22) handle\n");
                                 constexpr uint16_t param_count = 3;
@@ -374,14 +341,14 @@ int main()
                                         param_count,
                                         i
                                     );
-                                    log_message(true, "tx: MAVLINK_MSG_ID_PARAM_VALUE(22): %s=%.2f (%u/%u)", names[i], values[i], i+1, param_count);
+                                    logger::line("tx: MAVLINK_MSG_ID_PARAM_VALUE(22): %s=%.2f (%u/%u)", names[i], values[i], i+1, param_count);
                                     mav_send(sock, state, &pm);
                                 }
                             }
                             break;
                         }
                         default:
-                            log_message(true, "rx: Unknown message ID: %u", msg.msgid);
+                            logger::line("rx: Unknown message ID: %u", msg.msgid);
                             break;
                     }
                 }
