@@ -1,9 +1,17 @@
-CXX = g++
+CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
-INC = -Iexternal/mavlink
+INC      = -Iinc -Iexternal/mavlink
 
-all:
-	$(CXX) $(CXXFLAGS) main.cpp -o ground_rover_daemon $(INC)
+SRCS   = src/main.cpp
+TARGET = build/ground_rover_daemon
+
+all: build $(TARGET)
+
+build:
+	mkdir -p build
+
+$(TARGET): $(SRCS)
+	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC)
 
 clean:
-	rm -f ground_rover_daemon
+	rm -rf build
