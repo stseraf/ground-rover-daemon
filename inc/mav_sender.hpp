@@ -10,7 +10,7 @@
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-#include "external/mavlink/common/mavlink.h"
+#include "common/mavlink.h"
 #pragma GCC diagnostic pop
 
 #include "config.hpp"
