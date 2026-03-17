@@ -16,11 +16,19 @@
 #include "external/mavlink/common/mavlink.h"
 #pragma GCC diagnostic pop
 
-constexpr uint8_t  MAV_SYS_ID  = 1;
-constexpr uint8_t  MAV_COMP_ID = 1;
+namespace Config {
+    constexpr uint8_t MAV_SYS_ID = 1;
+    constexpr uint8_t MAV_COMP_ID = 1;
+    constexpr uint16_t UDP_BIND_PORT = 14550;
+    constexpr uint64_t HEARTBEAT_INTERVAL_US = 1'000'000; // 1 Hz
+    constexpr unsigned LOOP_SLEEP_US = 1'000;      // 1 ms
 
-constexpr uint16_t UDP_PORT    = 14550;
-constexpr uint16_t QGC_PORT    = 14550;
+    // Stub telemetry values
+    constexpr uint16_t DUMMY_LOAD_PERMILLE = 500; // stub: 50.0% CPU load
+    constexpr uint16_t DUMMY_BATTERY_MV = 12000; // stub: 12 V
+    constexpr int16_t DUMMY_CURRENT_CA = 0; // stub: 0 A
+    constexpr int8_t DUMMY_BATTERY_PCT = 80; // stub: 80%
+}
 
 static bool armed = false;
 
@@ -89,8 +97,8 @@ static void send_heartbeat(int sock)
     uint8_t base_mode = static_cast<uint8_t>(current_base_mode | (armed ? MAV_MODE_FLAG_SAFETY_ARMED : 0));
 
     mavlink_msg_heartbeat_pack(
-        MAV_SYS_ID,
-        MAV_COMP_ID,
+        Config::MAV_SYS_ID,
+        Config::MAV_COMP_ID,
         &msg,
         MAV_TYPE_GROUND_ROVER,
         MAV_AUTOPILOT_GENERIC,
@@ -106,12 +114,12 @@ static void send_sys_status(int sock)
     mavlink_message_t msg;
 
     mavlink_sys_status_t sys{};
-    sys.load              = 500; // (0.1%)
-    sys.voltage_battery   = 12000;
-    sys.current_battery   = 0;
-    sys.battery_remaining = 80;
+    sys.load              = Config::DUMMY_LOAD_PERMILLE;
+    sys.voltage_battery   = Config::DUMMY_BATTERY_MV;
+    sys.current_battery   = Config::DUMMY_CURRENT_CA;
+    sys.battery_remaining = Config::DUMMY_BATTERY_PCT;
 
-    mavlink_msg_sys_status_encode(MAV_SYS_ID, MAV_COMP_ID, &msg, &sys);
+    mavlink_msg_sys_status_encode(Config::MAV_SYS_ID, Config::MAV_COMP_ID, &msg, &sys);
     mav_send(sock, &msg);
 }
 
@@ -125,7 +133,7 @@ static void send_autopilot_version(int sock)
     | MAV_PROTOCOL_CAPABILITY_COMMAND_INT
     | MAV_PROTOCOL_CAPABILITY_MAVLINK2;
 
-    mavlink_msg_autopilot_version_encode(MAV_SYS_ID, MAV_COMP_ID, &msg, &av);
+    mavlink_msg_autopilot_version_encode(Config::MAV_SYS_ID, Config::MAV_COMP_ID, &msg, &av);
     log_message(true, "tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX", (unsigned long long)av.capabilities);
     mav_send(sock, &msg);
 }
@@ -156,7 +164,7 @@ static void send_available_modes(int sock, uint32_t mode)
     am.properties    = modes[mode-1].properties;
     std::strncpy(am.mode_name, modes[mode-1].name, sizeof(am.mode_name) - 1);
 
-    mavlink_msg_available_modes_encode(MAV_SYS_ID, MAV_COMP_ID, &msg, &am);
+    mavlink_msg_available_modes_encode(Config::MAV_SYS_ID, Config::MAV_COMP_ID, &msg, &am);
     log_message(true, "tx: MAVLINK_MSG_ID_AVAILABLE_MODES(435) mode %u/%u: %s", mode, number_modes, modes[mode-1].name);
     mav_send(sock, &msg);
 }
@@ -166,8 +174,8 @@ static void send_command_ack(int sock, uint16_t command, uint8_t result,
 {
     mavlink_message_t ack;
     mavlink_msg_command_ack_pack(
-        MAV_SYS_ID,
-        MAV_COMP_ID,
+        Config::MAV_SYS_ID,
+        Config::MAV_COMP_ID,
         &ack,
         command,
         result,
@@ -270,7 +278,7 @@ int main()
     sockaddr_in local{};
     local.sin_family      = AF_INET;
     local.sin_addr.s_addr = INADDR_ANY;
-    local.sin_port        = htons(UDP_PORT);
+    local.sin_port        = htons(Config::UDP_BIND_PORT);
 
     if (bind(sock, reinterpret_cast<struct sockaddr*>(&local), sizeof(local)) < 0) {
         std::perror("bind");
@@ -344,8 +352,8 @@ int main()
                                 std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
                                 mavlink_message_t mc;
                                 mavlink_msg_mission_count_pack(
-                                    MAV_SYS_ID,
-                                    MAV_COMP_ID,
+                                    Config::MAV_SYS_ID,
+                                    Config::MAV_COMP_ID,
                                     &mc,
                                     mrl.target_system,
                                     mrl.target_component,
@@ -377,8 +385,8 @@ int main()
                                 for (uint16_t i = 0; i < param_count; i++) {
                                     mavlink_message_t pm;
                                     mavlink_msg_param_value_pack(
-                                        MAV_SYS_ID,
-                                        MAV_COMP_ID,
+                                        Config::MAV_SYS_ID,
+                                        Config::MAV_COMP_ID,
                                         &pm,
                                         names[i],
                                         values[i],
@@ -402,11 +410,11 @@ int main()
 
         uint64_t now = micros();
 
-        if (now - last_hb > 1000000) { // 1 Hz
+        if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             send_heartbeat(sock);
             send_sys_status(sock);
             last_hb = now;
         }
-        usleep(1000); // 1 ms
+        usleep(Config::LOOP_SLEEP_US);
     }
 }
