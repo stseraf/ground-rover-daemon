@@ -15,6 +15,15 @@
 
 static std::atomic<bool> running{true};
 
+static void handle_signal(int sig)
+{
+    const char *msg_int  = "[signal] SIGINT received — shutting down\n";
+    const char *msg_term = "[signal] SIGTERM received — shutting down\n";
+    const char *msg = (sig == SIGINT) ? msg_int : msg_term;
+    ssize_t unused __attribute__((unused)) = write(STDOUT_FILENO, msg, __builtin_strlen(msg));
+    running = false;
+}
+
 /* -------------------- utils -------------------- */
 
 static uint64_t micros()
@@ -28,8 +37,8 @@ static uint64_t micros()
 
 int main()
 {
-    std::signal(SIGINT,  [](int) { running = false; });
-    std::signal(SIGTERM, [](int) { running = false; });
+    std::signal(SIGINT,  handle_signal);
+    std::signal(SIGTERM, handle_signal);
     UdpSocket  sock{Config::UDP_BIND_PORT};
     RoverState state{};
     MavSender  mav{sock, Config::MAV_SYS_ID, Config::MAV_COMP_ID};
