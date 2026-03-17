@@ -5,11 +5,11 @@
 #include <cmath>
 #include <cerrno>
 #include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <ctime>
 
 #include <array>
+
+#include "udp_socket.hpp"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
@@ -82,15 +82,14 @@ void log_message(bool new_line, const char *format, ...)
 
 /* -------------------- MAVLink TX -------------------- */
 
-static void mav_send(int sock, mavlink_message_t *msg)
+static void mav_send(UdpSocket& sock, mavlink_message_t *msg)
 {
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     int len = mavlink_msg_to_send_buffer(buf, msg);
-    sendto(sock, buf, static_cast<size_t>(len), 0,
-           reinterpret_cast<struct sockaddr*>(&qgc_addr), qgc_addr_len);
+    sock.send_to(buf, static_cast<size_t>(len), qgc_addr, qgc_addr_len);
 }
 
-static void send_heartbeat(int sock)
+static void send_heartbeat(UdpSocket& sock)
 {
     mavlink_message_t msg;
 
@@ -109,7 +108,7 @@ static void send_heartbeat(int sock)
     mav_send(sock, &msg);
 }
 
-static void send_sys_status(int sock)
+static void send_sys_status(UdpSocket& sock)
 {
     mavlink_message_t msg;
 
@@ -123,7 +122,7 @@ static void send_sys_status(int sock)
     mav_send(sock, &msg);
 }
 
-static void send_autopilot_version(int sock)
+static void send_autopilot_version(UdpSocket& sock)
 {
     mavlink_message_t msg;
 
@@ -138,7 +137,7 @@ static void send_autopilot_version(int sock)
     mav_send(sock, &msg);
 }
 
-static void send_available_modes(int sock, uint32_t mode)
+static void send_available_modes(UdpSocket& sock, uint32_t mode)
 {
     struct ModeInfo {
         const char *name;
@@ -169,7 +168,7 @@ static void send_available_modes(int sock, uint32_t mode)
     mav_send(sock, &msg);
 }
 
-static void send_command_ack(int sock, uint16_t command, uint8_t result,
+static void send_command_ack(UdpSocket& sock, uint16_t command, uint8_t result,
                              uint8_t target_system, uint8_t target_component)
 {
     mavlink_message_t ack;
@@ -190,7 +189,7 @@ static void send_command_ack(int sock, uint16_t command, uint8_t result,
 
 /* -------------------- COMMAND HANDLING -------------------- */
 
-static void handle_command_long(int sock,
+static void handle_command_long(UdpSocket& sock,
                                 const mavlink_command_long_t *cmd)
 {
     if (cmd->command == MAV_CMD_COMPONENT_ARM_DISARM) {
@@ -269,21 +268,7 @@ static void handle_command_long(int sock,
 
 int main()
 {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        std::perror("socket");
-        return 1;
-    }
-
-    sockaddr_in local{};
-    local.sin_family      = AF_INET;
-    local.sin_addr.s_addr = INADDR_ANY;
-    local.sin_port        = htons(Config::UDP_BIND_PORT);
-
-    if (bind(sock, reinterpret_cast<struct sockaddr*>(&local), sizeof(local)) < 0) {
-        std::perror("bind");
-        return 1;
-    }
+    UdpSocket sock{Config::UDP_BIND_PORT};
 
     log_message(true, "MAVLink rover daemon started");
 
@@ -293,8 +278,8 @@ int main()
 
     while (true) {
         uint8_t receive_buffer[2048];
-        ssize_t n = recvfrom(sock, receive_buffer, sizeof(receive_buffer), MSG_DONTWAIT,
-                             reinterpret_cast<struct sockaddr*>(&qgc_addr), &qgc_addr_len);
+        ssize_t n = sock.recv_nonblocking(receive_buffer, sizeof(receive_buffer),
+                                          qgc_addr, qgc_addr_len);
         if (n > 0) {
             for (ssize_t i = 0; i < n; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, receive_buffer[i], &msg, &status)) {
