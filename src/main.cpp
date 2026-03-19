@@ -12,6 +12,7 @@
 #include "logger.hpp"
 #include "mav_sender.hpp"
 #include "command_handlers.hpp"
+#include "diff_drive.hpp"
 
 static std::atomic<bool> running{true};
 
@@ -75,7 +76,16 @@ int main()
                         case MAVLINK_MSG_ID_MANUAL_CONTROL: {
                             mavlink_manual_control_t mc;
                             mavlink_msg_manual_control_decode(&msg, &mc);
-                            logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X           ", mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                            if (state.armed) {
+                                DriveOutput drive = compute_diff_drive(mc.z, mc.y);
+                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X | drive L=%d R=%d   ",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons, drive.left, drive.right);
+                                mav.send_servo_output_raw(state, drive.left, drive.right);
+                            } else {
+                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X | DISARMED           ",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                                mav.send_servo_output_raw(state, 0, 0);
+                            }
                             break;
                         }
                         case MAVLINK_MSG_ID_COMMAND_LONG: {
