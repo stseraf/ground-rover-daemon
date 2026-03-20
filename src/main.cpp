@@ -12,6 +12,7 @@
 #include "logger.hpp"
 #include "mav_sender.hpp"
 #include "command_handlers.hpp"
+#include "diff_drive.hpp"
 
 static std::atomic<bool> running{true};
 
@@ -45,6 +46,8 @@ int main()
 
     logger::line("MAVLink rover daemon started");
 
+    DriveSlew slew{};
+    uint64_t last_mc_us = 0;
     uint64_t last_hb = 0;
     mavlink_message_t msg;
     mavlink_status_t  status;
@@ -75,7 +78,22 @@ int main()
                         case MAVLINK_MSG_ID_MANUAL_CONTROL: {
                             mavlink_manual_control_t mc;
                             mavlink_msg_manual_control_decode(&msg, &mc);
-                            logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%d y=%d z=%d r=%d buttons=0x%02X           ", mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                            uint64_t now_mc = micros();
+                            if (state.armed) {
+                                uint32_t elapsed_ms = static_cast<uint32_t>(
+                                    std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
+                                DriveOutput raw     = compute_diff_drive(mc.x, mc.y);
+                                DriveOutput smoothed = slew.step(raw, elapsed_ms);
+                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);
+                                mav.send_servo_output_raw(state, smoothed.left, smoothed.right);
+                            } else {
+                                slew.reset();
+                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | DISARMED           ",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                                mav.send_servo_output_raw(state, 0, 0);
+                            }
+                            last_mc_us = now_mc;
                             break;
                         }
                         case MAVLINK_MSG_ID_COMMAND_LONG: {

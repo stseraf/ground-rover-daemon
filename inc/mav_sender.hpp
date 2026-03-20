@@ -107,6 +107,26 @@ public:
         send(msg, state);
     }
 
+    // left/right in [-1000, 1000]; converted to PWM µs [1000, 2000]
+    void send_servo_output_raw(const RoverState& state, int16_t left, int16_t right)
+    {
+        auto to_pwm = [](int16_t v) -> uint16_t {
+            return static_cast<uint16_t>(Config::DRIVE_PWM_CENTER +
+                   (static_cast<int32_t>(v) * Config::DRIVE_PWM_HALF_RANGE) / Config::DRIVE_AXIS_MAX);
+        };
+        const uint16_t pwm_left  = to_pwm(left);
+        const uint16_t pwm_right = to_pwm(right);
+        const uint16_t neutral   = Config::DRIVE_PWM_CENTER;
+        mavlink_message_t msg;
+        mavlink_msg_servo_output_raw_pack(sys_id_, comp_id_, &msg,
+            0,           /* time_usec */
+            0,           /* port: MAIN */
+            pwm_left, pwm_right,
+            neutral, neutral, neutral, neutral, neutral, neutral,
+            neutral, neutral, neutral, neutral, neutral, neutral, neutral, neutral);
+        send(msg, state);
+    }
+
     void send_param(const RoverState& state, const char *name, float value,
                     uint16_t index, uint16_t total)
     {
