@@ -13,13 +13,17 @@
 #include "mav_sender.hpp"
 #include "command_handlers.hpp"
 #include "diff_drive.hpp"
+#include "uart_motor_driver.hpp"
+#ifdef DRIVER_TB6612
+#include "tb6612_driver.hpp"
+#endif
 
 static std::atomic<bool> running{true};
 
 static void handle_signal(int sig)
 {
-    const char *msg_int  = "[signal] SIGINT received — shutting down\n";
-    const char *msg_term = "[signal] SIGTERM received — shutting down\n";
+    const char *msg_int  = "\n[signal] SIGINT received — shutting down\n";
+    const char *msg_term = "\n[signal] SIGTERM received — shutting down\n";
     const char *msg = (sig == SIGINT) ? msg_int : msg_term;
     ssize_t unused __attribute__((unused)) = write(STDOUT_FILENO, msg, __builtin_strlen(msg));
     running = false;
@@ -46,6 +50,11 @@ int main()
 
     logger::line("MAVLink rover daemon started");
 
+#ifdef DRIVER_TB6612
+    Tb6612Driver    motors{};
+#else
+    UartMotorDriver motors{};
+#endif
     DriveSlew slew{};
     uint64_t last_mc_us = 0;
     uint64_t last_hb = 0;
@@ -86,11 +95,13 @@ int main()
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
                                 logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);
+                                motors.set(smoothed.left, smoothed.right);
                                 mav.send_servo_output_raw(state, smoothed.left, smoothed.right);
                             } else {
                                 slew.reset();
                                 logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | DISARMED           ",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                                motors.stop();
                                 mav.send_servo_output_raw(state, 0, 0);
                             }
                             last_mc_us = now_mc;

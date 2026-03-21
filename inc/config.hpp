@@ -16,6 +16,25 @@ namespace Config {
     constexpr uint16_t DRIVE_PWM_HALF_RANGE = 400;  // µs — added/subtracted at full stick (range: 1100..1900)
     constexpr uint32_t DRIVE_SLEW_TIME_MS   = 500; // ms to ramp from 0 to full scale
 
+    // TB6612FNG motor driver
+    namespace Tb6612 {
+        // BCM GPIO pin numbers — TODO: fill in actual wiring
+        constexpr unsigned AIN1_PIN = 0;   // Motor A (left)  direction bit 1
+        constexpr unsigned AIN2_PIN = 0;   // Motor A (left)  direction bit 2
+        constexpr unsigned BIN1_PIN = 0;   // Motor B (right) direction bit 1
+        constexpr unsigned BIN2_PIN = 0;   // Motor B (right) direction bit 2
+        constexpr unsigned STBY_PIN = 0;   // Standby — active-HIGH enables driver
+
+        // Hardware PWM sysfs paths (requires dtoverlay=pwm-2chan in /boot/config.txt)
+        constexpr const char* PWMA_PATH = "/sys/class/pwm/pwmchip0/pwm0"; // Motor A
+        constexpr const char* PWMB_PATH = "/sys/class/pwm/pwmchip0/pwm1"; // Motor B
+
+        // 25000 ns = 40 kHz — within TB6612 spec, above audible range
+        constexpr uint32_t PWM_PERIOD_NS = 25000;
+
+        constexpr const char* GPIOCHIP = "/dev/gpiochip0";
+    }
+
     // Stub telemetry values
     constexpr uint16_t DUMMY_LOAD_PERMILLE  = 500;  // stub: 50.0% CPU load
     constexpr uint16_t DUMMY_BATTERY_MV     = 12000; // stub: 12 V
