@@ -31,8 +31,9 @@ namespace Config {
         constexpr const char* PWMA_PATH = "/sys/class/pwm/pwmchip0/pwm0"; // GPIO12, Motor A
         constexpr const char* PWMB_PATH = "/sys/class/pwm/pwmchip0/pwm1"; // GPIO13, Motor B
 
-        // 25000 ns = 40 kHz — within TB6612 spec, above audible range
-        constexpr uint32_t PWM_PERIOD_NS = 25000;
+        // 20_000_000 ns = 50 Hz — standard RC/ESC frequency; hardware PWM holds
+        // duty cycle between writes, so motors keep running between QGC updates (100 ms)
+        constexpr uint32_t PWM_PERIOD_NS = 20'000'000;
 
         constexpr const char* GPIOCHIP = "/dev/gpiochip0";
     }

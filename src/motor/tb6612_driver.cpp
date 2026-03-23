@@ -93,12 +93,12 @@ void Tb6612Driver::set_channel(unsigned idx_in1, unsigned idx_in2,
         set_pin(idx_in1, new_dir > 0 ? 1 : 0);
         set_pin(idx_in2, new_dir > 0 ? 0 : 1);
         pwm_write_duty(fd_duty,
-            static_cast<uint32_t>(value > 0 ? value : -value)
-            * Config::Tb6612::PWM_PERIOD_NS / 1000);
+            static_cast<uint32_t>(static_cast<uint64_t>(value > 0 ? value : -value)
+            * Config::Tb6612::PWM_PERIOD_NS / 1000));
     } else {
         pwm_write_duty(fd_duty,
-            static_cast<uint32_t>(value > 0 ? value : -value)
-            * Config::Tb6612::PWM_PERIOD_NS / 1000);
+            static_cast<uint32_t>(static_cast<uint64_t>(value > 0 ? value : -value)
+            * Config::Tb6612::PWM_PERIOD_NS / 1000));
     }
 
     dir = new_dir;
