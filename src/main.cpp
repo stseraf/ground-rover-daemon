@@ -91,13 +91,24 @@ int main()
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
                                 DriveOutput raw      = compute_diff_drive(mc.z, mc.y);
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
-                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
-                                    mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);
+                                int ain1 = smoothed.left  > 0 ? 1 : 0;
+                                int ain2 = smoothed.left  < 0 ? 1 : 0;
+                                int bin1 = smoothed.right > 0 ? 1 : 0;
+                                int bin2 = smoothed.right < 0 ? 1 : 0;
+                                int pwma = (smoothed.left  < 0 ? -smoothed.left  : smoothed.left)  / 10;
+                                int pwmb = (smoothed.right < 0 ? -smoothed.right : smoothed.right) / 10;
+                                logger::same_line(
+                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                    " | A:IN=%d%d PWM=%3d%% | B:IN=%d%d PWM=%3d%% | STBY=H",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons,
+                                    ain1, ain2, pwma, bin1, bin2, pwmb);
                                 motors.set(smoothed.left, smoothed.right);
                                 mav.send_servo_output_raw(state, smoothed.left, smoothed.right);
                             } else {
                                 slew.reset();
-                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | DISARMED           ",
+                                logger::same_line(
+                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                    " | A:IN=00 PWM=  0%% | B:IN=00 PWM=  0%% | STBY=L",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons);
                                 motors.stop();
                                 mav.send_servo_output_raw(state, 0, 0);
