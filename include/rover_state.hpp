@@ -14,5 +14,5 @@ struct RoverState {
     uint32_t    custom_mode     = 0;
     sockaddr_in qgc_addr        = {};
     socklen_t   qgc_addr_len    = sizeof(sockaddr_in);
-    bool        qgc_known       = false; // true once first packet received
+    bool        qgc_known       = false;
 };

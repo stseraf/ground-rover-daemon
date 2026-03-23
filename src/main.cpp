@@ -10,12 +10,12 @@
 #include "udp_socket.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
-#include "mav_sender.hpp"
-#include "command_handlers.hpp"
-#include "diff_drive.hpp"
-#include "uart_motor_driver.hpp"
+#include "mavlink/mav_sender.hpp"
+#include "mavlink/command_handlers.hpp"
+#include "drive/diff_drive.hpp"
+#include "motor/uart_motor_driver.hpp"
 #ifdef DRIVER_TB6612
-#include "tb6612_driver.hpp"
+#include "motor/tb6612_driver.hpp"
 #endif
 
 static std::atomic<bool> running{true};
@@ -29,16 +29,12 @@ static void handle_signal(int sig)
     running = false;
 }
 
-/* -------------------- utils -------------------- */
-
 static uint64_t micros()
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
 }
-
-/* -------------------- MAIN -------------------- */
 
 int main()
 {
@@ -73,7 +69,6 @@ int main()
                         case MAVLINK_MSG_ID_HEARTBEAT: {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
-                            //logger::line("rx: MAVLINK_MSG_ID_HEARTBEAT(0): type=%u autopilot=%u base_mode=0x%02X", hb.type, hb.autopilot, hb.base_mode);
                             break;
                         }
                         case MAVLINK_MSG_ID_SET_MODE: {
@@ -91,7 +86,7 @@ int main()
                             if (state.armed) {
                                 uint32_t elapsed_ms = static_cast<uint32_t>(
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
-                                DriveOutput raw     = compute_diff_drive(mc.x, mc.y);
+                                DriveOutput raw      = compute_diff_drive(mc.x, mc.y);
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
                                 logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);

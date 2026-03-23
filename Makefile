@@ -1,28 +1,35 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
-INC      = -Iinc -Iexternal/mavlink
+INC      = -Isrc -Iinclude -Iexternal/mavlink
 
 # ARCH=host (default, x86, native g++) or ARCH=rpi (cross-compile for RPi Zero 2W)
 ARCH    ?= host
 ifeq ($(ARCH),rpi)
   CXX      = aarch64-linux-gnu-g++
   CXXFLAGS += -march=armv8-a
-  ifdef SYSROOT
-    CXXFLAGS += --sysroot=$(SYSROOT)
-    LDFLAGS  += --sysroot=$(SYSROOT)
-  endif
 endif
 
-# DRIVER=stub (default, no deps) or DRIVER=tb6612 (requires libgpiod on target)
+# DRIVER=stub (default, no deps) or DRIVER=tb6612 (sysfs GPIO + PWM, no external libs)
 DRIVER  ?= stub
 ifeq ($(DRIVER),tb6612)
   CXXFLAGS += -DDRIVER_TB6612
-  LDFLAGS  += -lgpiod
 endif
 
-SRCS    = src/main.cpp
-HEADERS = $(wildcard inc/*.hpp)
-TARGET  = build/ground_rover_daemon
+SRCS = src/main.cpp \
+       src/mavlink/mav_sender.cpp \
+       src/mavlink/command_handlers.cpp
+
+ifeq ($(DRIVER),tb6612)
+  SRCS += src/motor/tb6612_driver.cpp
+endif
+
+HEADERS = $(wildcard include/*.hpp) \
+          $(wildcard src/*.hpp) \
+          $(wildcard src/mavlink/*.hpp) \
+          $(wildcard src/drive/*.hpp) \
+          $(wildcard src/motor/*.hpp)
+
+TARGET = build/ground_rover_daemon
 
 all: build $(TARGET)
 
@@ -35,11 +42,10 @@ $(TARGET): $(SRCS) $(HEADERS)
 
 rebuild: clean all
 
-# Deploy to RPi: make deploy [RPI=pi@pi-rover.lan] [SYSROOT=/opt/rpi-sysroot]
-RPI     ?= pi@pi-rover.lan
-SYSROOT ?= /opt/rpi-sysroot
+# Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
+RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 SYSROOT=$(SYSROOT)
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612
 	scp $(TARGET) $(RPI):/home/pi/.
 
 clean:

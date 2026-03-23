@@ -1,20 +1,14 @@
-#pragma once
-
-#include <cstdio>
-
+#include "command_handlers.hpp"
 #include "mav_sender.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-#include "common/mavlink.h"
-#pragma GCC diagnostic pop
+#include <cstdio>
 
-/* ---- individual command handlers ---- */
+namespace {
 
-inline void handle_arm_disarm(MavSender& mav, RoverState& state,
-                               const mavlink_command_long_t *cmd)
+void handle_arm_disarm(MavSender& mav, RoverState& state,
+                       const mavlink_command_long_t* cmd)
 {
     state.armed = (cmd->param1 > 0.5f);
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_COMPONENT_ARM_DISARM(400): Arm=%d",
@@ -23,8 +17,8 @@ inline void handle_arm_disarm(MavSender& mav, RoverState& state,
                          cmd->target_system, cmd->target_component);
 }
 
-inline void handle_request_message(MavSender& mav, RoverState& state,
-                                    const mavlink_command_long_t *cmd)
+void handle_request_message(MavSender& mav, RoverState& state,
+                             const mavlink_command_long_t* cmd)
 {
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): ");
     auto msg_id = static_cast<uint32_t>(cmd->param1);
@@ -82,8 +76,8 @@ inline void handle_request_message(MavSender& mav, RoverState& state,
     }
 }
 
-inline void handle_set_mode(MavSender& mav, RoverState& state,
-                             const mavlink_command_long_t *cmd)
+void handle_set_mode(MavSender& mav, RoverState& state,
+                     const mavlink_command_long_t* cmd)
 {
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_DO_SET_MODE(176): base_mode=0x%02X custom_mode=%u",
                  static_cast<uint32_t>(cmd->param1), static_cast<uint32_t>(cmd->param2));
@@ -93,10 +87,10 @@ inline void handle_set_mode(MavSender& mav, RoverState& state,
                          cmd->target_system, cmd->target_component);
 }
 
-/* ---- top-level COMMAND_LONG dispatcher ---- */
+} // namespace
 
-inline void handle_command_long(MavSender& mav, RoverState& state,
-                                 const mavlink_command_long_t *cmd)
+void handle_command_long(MavSender& mav, RoverState& state,
+                         const mavlink_command_long_t* cmd)
 {
     switch (cmd->command) {
         case MAV_CMD_COMPONENT_ARM_DISARM:

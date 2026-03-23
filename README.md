@@ -19,7 +19,6 @@ It implements enough of the MAVLink protocol for QGC to recognise the vehicle, a
   ```sh
   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
   ```
-- For `DRIVER=tb6612`: libgpiod from the RPi sysroot (see SYSROOT section below)
 
 ## Building
 
@@ -46,32 +45,11 @@ Two independent Makefile variables control the build:
 |---|---|---|
 | `make` | x86, stub motors | nothing |
 | `make ARCH=rpi` | aarch64, stub motors | `aarch64-linux-gnu-g++` |
-| `make ARCH=rpi DRIVER=tb6612 SYSROOT=/opt/rpi-sysroot` | aarch64, TB6612 driver | cross-compiler + RPi sysroot |
+| `make ARCH=rpi DRIVER=tb6612` | aarch64, TB6612 driver | `aarch64-linux-gnu-g++` only |
 
 The binary is placed at `build/ground_rover_daemon`.
 
-### Cross-compiling with SYSROOT (required for DRIVER=tb6612)
-
-Ubuntu ships `libgpiod.so.2`; Raspberry Pi OS Bookworm ships `libgpiod.so.3`. Linking against the host's libgpiod causes a runtime `not found` error on the RPi. The solution is to sync the RPi's own libraries and headers into a local sysroot and link against those.
-
-On the RPi, install the dev headers:
-```sh
-sudo apt install libgpiod-dev
-```
-
-On the host, create the sysroot directory and sync from the RPi:
-```sh
-sudo mkdir -p /opt/rpi-sysroot/usr/lib/aarch64-linux-gnu
-sudo mkdir -p /opt/rpi-sysroot/usr/include
-
-rsync -avz --mkpath pi@pi-rover.lan:/usr/lib/aarch64-linux-gnu/ /opt/rpi-sysroot/usr/lib/aarch64-linux-gnu/
-rsync -avz --mkpath pi@pi-rover.lan:/usr/include/ /opt/rpi-sysroot/usr/include/
-```
-
-Then build:
-```sh
-make rebuild ARCH=rpi DRIVER=tb6612 SYSROOT=/opt/rpi-sysroot
-```
+GPIO and PWM are accessed via Linux sysfs (`/sys/class/gpio`, `/sys/class/pwm`) — no external libraries required.
 
 ## Deploying to RPi
 
@@ -81,10 +59,10 @@ The `deploy` target builds for RPi and copies the binary over SSH in one step:
 make deploy
 ```
 
-Defaults: `RPI=pi@pi-rover.lan`, `SYSROOT=/opt/rpi-sysroot`. Override as needed:
+Default: `RPI=pi@pi-rover.lan`. Override as needed:
 
 ```sh
-make deploy RPI=pi@192.168.1.x SYSROOT=/opt/rpi-sysroot
+make deploy RPI=pi@192.168.1.x
 ```
 
 Set a permanent default in your shell:
