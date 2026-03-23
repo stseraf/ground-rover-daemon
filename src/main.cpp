@@ -52,15 +52,17 @@ int main()
     UartMotorDriver motors{};
 #endif
     DriveSlew slew{};
-    uint64_t last_mc_us = 0;
-    uint64_t last_hb = 0;
+    uint64_t last_mc_us        = 0;
+    uint64_t last_hb           = 0;
+    bool     mc_timeout_active = false;
+    uint64_t last_slew_tick_us = 0;
     mavlink_message_t msg;
     mavlink_status_t  status;
 
     while (running) {
         uint8_t receive_buffer[2048];
-        ssize_t n = sock.recv_nonblocking(receive_buffer, sizeof(receive_buffer),
-                                          state.qgc_addr, state.qgc_addr_len);
+        ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
+                              state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
             state.qgc_known = true;
             for (ssize_t i = 0; i < n; i++) {
@@ -86,7 +88,7 @@ int main()
                             if (state.armed) {
                                 uint32_t elapsed_ms = static_cast<uint32_t>(
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
-                                DriveOutput raw      = compute_diff_drive(mc.x, mc.y);
+                                DriveOutput raw      = compute_diff_drive(mc.z, mc.y);
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
                                 logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);
@@ -162,11 +164,27 @@ int main()
         }
 
         uint64_t now = micros();
+
+        if (state.armed && last_mc_us > 0
+                && (now - last_mc_us) > Config::MC_TIMEOUT_US) {
+            if (!mc_timeout_active) {
+                mc_timeout_active = true;
+                last_slew_tick_us = now;
+                logger::line("[failsafe] MANUAL_CONTROL timeout — slewing to stop");
+            }
+            uint32_t elapsed_ms = static_cast<uint32_t>(
+                std::min<uint64_t>((now - last_slew_tick_us) / 1000, 500));
+            last_slew_tick_us = now;
+            DriveOutput smoothed = slew.step({0, 0}, elapsed_ms);
+            motors.set(smoothed.left, smoothed.right);
+        } else {
+            mc_timeout_active = false;
+        }
+
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
             last_hb = now;
         }
-        usleep(Config::LOOP_SLEEP_US);
     }
 }

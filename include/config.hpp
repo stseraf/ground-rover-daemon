@@ -15,6 +15,7 @@ namespace Config {
     constexpr uint16_t DRIVE_PWM_CENTER      = 1500;
     constexpr uint16_t DRIVE_PWM_HALF_RANGE  = 400;
     constexpr uint32_t DRIVE_SLEW_TIME_MS    = 500;
+    constexpr uint64_t MC_TIMEOUT_US         = 500'000; // 500 ms — stop motors if no MANUAL_CONTROL
 
     // TB6612FNG motor driver
     namespace Tb6612 {
