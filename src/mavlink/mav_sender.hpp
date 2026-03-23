@@ -23,6 +23,10 @@ public:
     void send_mission_count(const RoverState& state,
                             uint8_t target_system, uint8_t target_component);
     void send_servo_output_raw(const RoverState& state, int16_t left, int16_t right);
+    void send_camera_information(const RoverState& state);
+    void send_camera_settings(const RoverState& state);
+    void send_storage_information(const RoverState& state);
+    void send_camera_capture_status(const RoverState& state);
     void send_param(const RoverState& state, const char* name, float value,
                     uint16_t index, uint16_t total);
 

@@ -17,7 +17,8 @@ endif
 
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
-       src/mavlink/command_handlers.cpp
+       src/mavlink/command_handlers.cpp \
+       src/mavlink/camera_handlers.cpp
 
 ifeq ($(DRIVER),tb6612)
   SRCS += src/motor/tb6612_driver.cpp

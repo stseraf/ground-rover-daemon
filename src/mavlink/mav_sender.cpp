@@ -82,7 +82,7 @@ void MavSender::send_command_ack(const RoverState& state, uint16_t command, uint
         0, /* progress */
         0, /* result_param2 */
         target_system, target_component);
-    logger::line("tx: MAVLINK_MSG_ID_COMMAND_ACK(77): command=%u result=%u", command, result);
+    // logger::line("tx: MAVLINK_MSG_ID_COMMAND_ACK(77): command=%u result=%u", command, result);
     send(msg, state);
 }
 
@@ -111,6 +111,39 @@ void MavSender::send_servo_output_raw(const RoverState& state, int16_t left, int
         pwm_left, pwm_right,
         neutral, neutral, neutral, neutral, neutral, neutral,
         neutral, neutral, neutral, neutral, neutral, neutral, neutral, neutral);
+    send(msg, state);
+}
+
+void MavSender::send_camera_information(const RoverState& state)
+{
+    mavlink_camera_information_t info = {};
+    // flags=0 → no capture capabilities; QGC stops polling on receipt
+    mavlink_message_t msg;
+    mavlink_msg_camera_information_encode(sys_id_, comp_id_, &msg, &info);
+    send(msg, state);
+}
+
+void MavSender::send_camera_settings(const RoverState& state)
+{
+    mavlink_camera_settings_t s = {};
+    mavlink_message_t msg;
+    mavlink_msg_camera_settings_encode(sys_id_, comp_id_, &msg, &s);
+    send(msg, state);
+}
+
+void MavSender::send_storage_information(const RoverState& state)
+{
+    mavlink_storage_information_t s = {};
+    mavlink_message_t msg;
+    mavlink_msg_storage_information_encode(sys_id_, comp_id_, &msg, &s);
+    send(msg, state);
+}
+
+void MavSender::send_camera_capture_status(const RoverState& state)
+{
+    mavlink_camera_capture_status_t s = {};
+    mavlink_message_t msg;
+    mavlink_msg_camera_capture_status_encode(sys_id_, comp_id_, &msg, &s);
     send(msg, state);
 }
 
