@@ -9,7 +9,7 @@
 // Pin mapping (BCM numbering set in config.hpp):
 //   Motor A (left):  PWMA → pwmchip0/pwm0, AIN1, AIN2
 //   Motor B (right): PWMB → pwmchip0/pwm1, BIN1, BIN2
-//   STBY: held HIGH for driver lifetime; pulled LOW on destruction.
+//   STBY: HIGH when armed (engage()), LOW when disarmed (release()) and on destruction.
 //
 // Direction logic (value in [-1000, 1000]):
 //   value > 0  → IN1=1, IN2=0  (forward)
@@ -27,6 +27,8 @@ public:
 
     void set(int16_t left, int16_t right) override;
     void stop() override;
+    void engage() override;   // STBY HIGH — enable driver
+    void release() override;  // stop + STBY LOW — disable driver, saves quiescent current
 
 private:
     static constexpr unsigned IDX_AIN1 = 0;

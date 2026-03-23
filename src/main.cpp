@@ -56,6 +56,7 @@ int main()
     uint64_t last_hb           = 0;
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
+    bool     prev_armed        = false;
     mavlink_message_t msg;
     mavlink_status_t  status;
 
@@ -164,6 +165,19 @@ int main()
         }
 
         uint64_t now = micros();
+
+        if (state.armed != prev_armed) {
+            if (state.armed) {
+                motors.engage();
+                logger::line("[motors] armed — driver enabled (STBY HIGH)");
+            } else {
+                motors.release();
+                slew.reset();
+                last_mc_us = 0;
+                logger::line("[motors] disarmed — driver released (STBY LOW)");
+            }
+            prev_armed = state.armed;
+        }
 
         if (state.armed && last_mc_us > 0
                 && (now - last_mc_us) > Config::MC_TIMEOUT_US) {

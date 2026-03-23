@@ -28,7 +28,7 @@ Tb6612Driver::Tb6612Driver()
     req.config.flags = GPIO_V2_LINE_FLAG_OUTPUT;
     req.config.num_attrs = 1;
     req.config.attrs[0].attr.id     = GPIO_V2_LINE_ATTR_ID_OUTPUT_VALUES;
-    req.config.attrs[0].attr.values = (UINT64_C(1) << IDX_STBY); // STBY starts HIGH
+    req.config.attrs[0].attr.values = 0; // STBY starts LOW — engage() on arm
     req.config.attrs[0].mask        = 0x1f; // apply to all 5 pins
 
     if (::ioctl(chip_fd_, GPIO_V2_GET_LINE_IOCTL, &req) < 0) {
@@ -68,6 +68,17 @@ void Tb6612Driver::set(int16_t left, int16_t right)
 void Tb6612Driver::stop()
 {
     set(0, 0);
+}
+
+void Tb6612Driver::engage()
+{
+    set_pin(IDX_STBY, 1);
+}
+
+void Tb6612Driver::release()
+{
+    stop();
+    set_pin(IDX_STBY, 0);
 }
 
 void Tb6612Driver::set_pin(unsigned idx, int value)
