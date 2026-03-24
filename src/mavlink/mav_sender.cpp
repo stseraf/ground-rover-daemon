@@ -45,6 +45,18 @@ void MavSender::send_autopilot_version(const RoverState& state)
     send(msg, state);
 }
 
+void MavSender::send_protocol_version(const RoverState& state)
+{
+    mavlink_message_t msg;
+    mavlink_protocol_version_t pv{};
+    pv.version     = 200;  // MAVLink 2
+    pv.min_version = 100;
+    pv.max_version = 200;
+    mavlink_msg_protocol_version_encode(sys_id_, comp_id_, &msg, &pv);
+    logger::line("tx: MAVLINK_MSG_ID_PROTOCOL_VERSION(300): version=%u", pv.version);
+    send(msg, state);
+}
+
 void MavSender::send_available_modes(const RoverState& state, uint32_t mode)
 {
     struct ModeInfo {

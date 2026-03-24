@@ -22,6 +22,18 @@ void handle_request_message(MavSender& mav, RoverState& state,
                              const mavlink_command_long_t* cmd)
 {
     auto msg_id = static_cast<uint32_t>(cmd->param1);
+
+    // Silent ACK for known-unsupported IDs — no log to avoid terminal spam
+    switch (msg_id) {
+        case MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION: // 280 — polled ~1 Hz by QGC
+        case MAVLINK_MSG_ID_COMPONENT_INFORMATION:      // 395
+        case MAVLINK_MSG_ID_COMPONENT_METADATA:         // 397
+            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
+                                 cmd->target_system, cmd->target_component);
+            return;
+        default: break;
+    }
+
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): msg_id=%u", msg_id);
 
     switch (msg_id) {
@@ -34,6 +46,11 @@ void handle_request_message(MavSender& mav, RoverState& state,
             mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                                  cmd->target_system, cmd->target_component);
             mav.send_autopilot_version(state);
+            break;
+        case MAVLINK_MSG_ID_PROTOCOL_VERSION:
+            mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
+                                 cmd->target_system, cmd->target_component);
+            mav.send_protocol_version(state);
             break;
         case MAVLINK_MSG_ID_AVAILABLE_MODES:
             mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
