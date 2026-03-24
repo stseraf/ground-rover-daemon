@@ -18,6 +18,7 @@ public:
     void send_sys_status(const RoverState& state);
     void send_autopilot_version(const RoverState& state);
     void send_protocol_version(const RoverState& state);
+    void send_current_mode(const RoverState& state);
     void send_available_modes(const RoverState& state, uint32_t mode);
     void send_command_ack(const RoverState& state, uint16_t command, uint8_t result,
                           uint8_t target_system, uint8_t target_component);

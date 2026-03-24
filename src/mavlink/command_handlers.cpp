@@ -80,6 +80,7 @@ void handle_set_mode(MavSender& mav, RoverState& state,
     state.custom_mode = static_cast<uint32_t>(cmd->param2);
     mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                          cmd->target_system, cmd->target_component);
+    mav.send_current_mode(state);
 }
 
 } // namespace

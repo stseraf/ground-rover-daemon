@@ -143,23 +143,16 @@ Primary role: failsafe — if LTE/QGC link drops, ELRS takes over motor control.
 
 ---
 
-### Priority 7 — Basic Autopilot Modes (requires GPS)
-**What:** A few simple autonomous behaviors beyond manual.
-
-**Scope:**
-- `HOLD` — stop and hold position (GPS-assisted)
-- `RETURN` — navigate back to home position (basic waypoint logic)
-- Mode commanded via QGC flight mode buttons (already handled by `handle_set_mode`)
-- Simple proportional controller; no full PID stack needed initially
-
-**Why last:** Needs GPS + tuned drive + stable link — all the above.
-
----
-
 ## What Is Explicitly Out of Scope (for daemon)
 - Video streaming pipeline (separate systemd service)
 - LTE network bring-up (ModemManager/NetworkManager)
 - Cross-compile/deployment scripts (separate concern, tracked separately)
+- **Flight mode switching in QGC** — QGC does not expose a mode switcher UI for
+  `MAV_AUTOPILOT_GENERIC` vehicles regardless of `AVAILABLE_MODES` / `CURRENT_MODE`
+  microservice support. Switching to `MAV_AUTOPILOT_ARDUPILOTMEGA` enables the UI but
+  triggers QGC's mandatory ArduPilot parameter validation which is not worth implementing.
+  Mode state is tracked internally (`RoverState::custom_mode`) and reported via HEARTBEAT
+  and CURRENT_MODE, but QGC cannot be used to switch modes on this vehicle type.
 
 ---
 
@@ -173,7 +166,6 @@ Primary role: failsafe — if LTE/QGC link drops, ELRS takes over motor control.
 | 4 | ELRS RX + failsafe logic | not started | 1, 2 |
 | 5 | GPS module + MAVLink telemetry | not started | nothing |
 | 6 | LTE monitoring + failsafe | not started | 4 |
-| 7 | Autopilot modes | not started | 5, 1 |
 
 Features 1, 2, 3 (Phases 1-2), and 5 can be worked in parallel (no interdependencies).
 Logging Phases 3-4 are gated: Phase 3 (CSV telemetry) pairs with Feature 5 (GPS); Phase 4 (log level param) requires Feature 2 (param protocol).

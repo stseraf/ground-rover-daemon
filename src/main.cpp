@@ -209,6 +209,7 @@ int main()
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
+            mav.send_current_mode(state);
             last_hb = now;
         }
     }
