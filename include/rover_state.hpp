@@ -11,7 +11,7 @@
 struct RoverState {
     bool        armed           = false;
     uint8_t     base_mode       = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
-    uint32_t    custom_mode     = 0;
+    uint32_t    custom_mode     = 0;  // 0=MANUAL (ArduRover custom_mode value)
     sockaddr_in qgc_addr        = {};
     socklen_t   qgc_addr_len    = sizeof(sockaddr_in);
     bool        qgc_known       = false;
