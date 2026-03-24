@@ -47,7 +47,7 @@ void handle_request_message(MavSender& mav, RoverState& state,
             handle_camera_request_message(mav, state, cmd);
             break;
         default:
-            std::printf("Unknown REQUEST_MESSAGE(%u): MAV_RESULT_UNSUPPORTED\n", msg_id);
+            logger::line("Unknown REQUEST_MESSAGE(%u): MAV_RESULT_UNSUPPORTED", msg_id);
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
                                  cmd->target_system, cmd->target_component);
             break;

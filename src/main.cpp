@@ -145,7 +145,7 @@ int main()
                             mavlink_mission_request_list_t mrl;
                             mavlink_msg_mission_request_list_decode(&msg, &mrl);
                             logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u", mrl.target_system, mrl.target_component);
-                            std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
+                            //std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
                             mav.send_mission_count(state, mrl.target_system, mrl.target_component);
                             break;
                         }
@@ -159,7 +159,7 @@ int main()
                             mavlink_param_request_list_t prl;
                             mavlink_msg_param_request_list_decode(&msg, &prl);
                             logger::line("rx: MAVLINK_MSG_ID_PARAM_REQUEST_LIST(21) received target=%u:%u", prl.target_system, prl.target_component);
-                            std::printf("MAVLINK_MSG_ID_PARAM_VALUE(22) handle\n");
+                            //std::printf("MAVLINK_MSG_ID_PARAM_VALUE(22) handle\n");
                             constexpr uint16_t param_count = 3;
                             const char  *names[param_count]  = { "DUMMY_P1", "DUMMY_P2", "DUMMY_P3" };
                             const float  values[param_count] = { 0.0f, 0.0f, 0.0f };
