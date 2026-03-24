@@ -25,8 +25,6 @@ static inline int16_t clamp_axis(int32_t v)
 struct DriveSlew {
     DriveOutput current{0, 0};
 
-    // Call each time a new target is known; elapsed_ms = time since last call.
-    // Returns the slew-limited output (also stored in current).
     DriveOutput step(DriveOutput target, uint32_t elapsed_ms)
     {
         int32_t max_delta = static_cast<int32_t>(Config::DRIVE_AXIS_MAX)

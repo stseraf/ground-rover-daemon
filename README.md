@@ -15,6 +15,10 @@ It implements enough of the MAVLink protocol for QGC to recognise the vehicle, a
 
 - C++17 compiler (GCC or Clang)
 - `make`
+- For `ARCH=rpi`: cross-compiler (RPi Zero 2W runs 64-bit aarch64 OS):
+  ```sh
+  sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+  ```
 
 ## Building
 
@@ -30,18 +34,77 @@ Or if already cloned:
 git submodule update --init --recursive
 ```
 
-Build:
+Two independent Makefile variables control the build:
 
-```sh
-make
-```
+| Variable | Values | Default |
+|---|---|---|
+| `ARCH` | `host`, `rpi` | `host` |
+| `DRIVER` | `stub`, `tb6612` | `stub` |
+
+| Command | Output | Requirements |
+|---|---|---|
+| `make` | x86, stub motors | nothing |
+| `make ARCH=rpi` | aarch64, stub motors | `aarch64-linux-gnu-g++` |
+| `make ARCH=rpi DRIVER=tb6612` | aarch64, TB6612 driver | `aarch64-linux-gnu-g++` only |
 
 The binary is placed at `build/ground_rover_daemon`.
+
+GPIO and PWM are accessed via Linux sysfs (`/sys/class/gpio`, `/sys/class/pwm`) — no external libraries required.
+
+## Deploying to RPi
+
+The `deploy` target builds for RPi and copies the binary over SSH in one step:
+
+```sh
+make deploy
+```
+
+Default: `RPI=pi@pi-rover.lan`. Override as needed:
+
+```sh
+make deploy RPI=pi@192.168.1.x
+```
+
+Set a permanent default in your shell:
+```sh
+echo 'export RPI=pi@pi-rover.lan' >> ~/.bashrc
+source ~/.bashrc
+```
+
+## RPi hardware setup (DRIVER=tb6612)
+
+### 1. Enable hardware PWM
+
+Add to `/boot/firmware/config.txt` (under `[all]`):
+
+```
+dtoverlay=pwm-2chan
+```
+
+Also disable audio to avoid GPIO18 conflict (PWM0 shares GPIO18 with audio):
+
+```
+dtparam=audio=off
+```
+
+Reboot, then verify:
+```sh
+ls /sys/class/pwm/pwmchip0/   # should exist
+cat /sys/class/pwm/pwmchip0/npwm  # should print 2
+```
+
+### 2. GPIO pin wiring
+
+Pin numbers are configured in `inc/config.hpp` (`Config::Tb6612` namespace). The current values are placeholders — fill in actual BCM pin numbers to match your wiring before running.
+
+### 3. Permissions
+
+The daemon requires access to `/dev/gpiochip0` and `/sys/class/pwm/`. Run as root (`sudo`) or configure udev rules for the `gpio` group.
 
 ## Running
 
 ```sh
-./build/ground_rover_daemon
+sudo ./ground_rover_daemon
 ```
 
 Then open QGroundControl — it will auto-connect on UDP port 14550.
@@ -50,9 +113,12 @@ Then open QGroundControl — it will auto-connect on UDP port 14550.
 
 ```
 src/                    # compiled sources
-  main.cpp              # event loop (~90 lines)
+  main.cpp              # event loop
 inc/                    # project headers
-  config.hpp            # compile-time constants
+  config.hpp            # compile-time constants (pins, PWM paths, MAVLink IDs)
+  motor_driver.hpp      # IMotorDriver interface
+  tb6612_driver.hpp     # TB6612 H-bridge driver (libgpiod 2.x + sysfs PWM)
+  uart_motor_driver.hpp # no-op stub driver (host builds)
   udp_socket.hpp        # RAII UDP socket wrapper
   rover_state.hpp       # mutable daemon state struct
   logger.hpp            # timestamped stdout logging
@@ -74,3 +140,9 @@ All tunable constants are in `inc/config.hpp`:
 | `UDP_BIND_PORT` | `14550` | UDP port to bind |
 | `HEARTBEAT_INTERVAL_US` | `1 000 000` | Heartbeat period (µs) |
 | `LOOP_SLEEP_US` | `1 000` | Main loop sleep (µs) |
+| `Config::Tb6612::AIN1_PIN` | `0` (placeholder) | BCM pin for Motor A direction bit 1 |
+| `Config::Tb6612::AIN2_PIN` | `0` (placeholder) | BCM pin for Motor A direction bit 2 |
+| `Config::Tb6612::BIN1_PIN` | `0` (placeholder) | BCM pin for Motor B direction bit 1 |
+| `Config::Tb6612::BIN2_PIN` | `0` (placeholder) | BCM pin for Motor B direction bit 2 |
+| `Config::Tb6612::STBY_PIN` | `0` (placeholder) | BCM pin for TB6612 standby |
+| `Config::Tb6612::PWM_PERIOD_NS` | `25000` | PWM period in ns (40 kHz) |

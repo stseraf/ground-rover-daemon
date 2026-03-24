@@ -10,22 +10,24 @@
 #include "udp_socket.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
-#include "mav_sender.hpp"
-#include "command_handlers.hpp"
-#include "diff_drive.hpp"
+#include "mavlink/mav_sender.hpp"
+#include "mavlink/command_handlers.hpp"
+#include "drive/diff_drive.hpp"
+#include "motor/uart_motor_driver.hpp"
+#ifdef DRIVER_TB6612
+#include "motor/tb6612_driver.hpp"
+#endif
 
 static std::atomic<bool> running{true};
 
 static void handle_signal(int sig)
 {
-    const char *msg_int  = "[signal] SIGINT received — shutting down\n";
-    const char *msg_term = "[signal] SIGTERM received — shutting down\n";
+    const char *msg_int  = "\n[signal] SIGINT received — shutting down\n";
+    const char *msg_term = "\n[signal] SIGTERM received — shutting down\n";
     const char *msg = (sig == SIGINT) ? msg_int : msg_term;
     ssize_t unused __attribute__((unused)) = write(STDOUT_FILENO, msg, __builtin_strlen(msg));
     running = false;
 }
-
-/* -------------------- utils -------------------- */
 
 static uint64_t micros()
 {
@@ -33,8 +35,6 @@ static uint64_t micros()
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
 }
-
-/* -------------------- MAIN -------------------- */
 
 int main()
 {
@@ -46,16 +46,24 @@ int main()
 
     logger::line("MAVLink rover daemon started");
 
+#ifdef DRIVER_TB6612
+    Tb6612Driver    motors{};
+#else
+    UartMotorDriver motors{};
+#endif
     DriveSlew slew{};
-    uint64_t last_mc_us = 0;
-    uint64_t last_hb = 0;
+    uint64_t last_mc_us        = 0;
+    uint64_t last_hb           = 0;
+    bool     mc_timeout_active = false;
+    uint64_t last_slew_tick_us = 0;
+    bool     prev_armed        = false;
     mavlink_message_t msg;
     mavlink_status_t  status;
 
     while (running) {
         uint8_t receive_buffer[2048];
-        ssize_t n = sock.recv_nonblocking(receive_buffer, sizeof(receive_buffer),
-                                          state.qgc_addr, state.qgc_addr_len);
+        ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
+                              state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
             state.qgc_known = true;
             for (ssize_t i = 0; i < n; i++) {
@@ -64,7 +72,6 @@ int main()
                         case MAVLINK_MSG_ID_HEARTBEAT: {
                             mavlink_heartbeat_t hb;
                             mavlink_msg_heartbeat_decode(&msg, &hb);
-                            //logger::line("rx: MAVLINK_MSG_ID_HEARTBEAT(0): type=%u autopilot=%u base_mode=0x%02X", hb.type, hb.autopilot, hb.base_mode);
                             break;
                         }
                         case MAVLINK_MSG_ID_SET_MODE: {
@@ -82,15 +89,28 @@ int main()
                             if (state.armed) {
                                 uint32_t elapsed_ms = static_cast<uint32_t>(
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
-                                DriveOutput raw     = compute_diff_drive(mc.x, mc.y);
+                                DriveOutput raw      = compute_diff_drive(mc.z, mc.y);
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
-                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | drive L=%04d R=%04d   ",
-                                    mc.x, mc.y, mc.z, mc.r, mc.buttons, smoothed.left, smoothed.right);
+                                int ain1 = smoothed.left  > 0 ? 1 : 0;
+                                int ain2 = smoothed.left  < 0 ? 1 : 0;
+                                int bin1 = smoothed.right > 0 ? 1 : 0;
+                                int bin2 = smoothed.right < 0 ? 1 : 0;
+                                int pwma = (smoothed.left  < 0 ? -smoothed.left  : smoothed.left)  / 10;
+                                int pwmb = (smoothed.right < 0 ? -smoothed.right : smoothed.right) / 10;
+                                logger::same_line(
+                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                    " | A:IN=%d%d PWM=%3d%% | B:IN=%d%d PWM=%3d%% | STBY=H",
+                                    mc.x, mc.y, mc.z, mc.r, mc.buttons,
+                                    ain1, ain2, pwma, bin1, bin2, pwmb);
+                                motors.set(smoothed.left, smoothed.right);
                                 mav.send_servo_output_raw(state, smoothed.left, smoothed.right);
                             } else {
                                 slew.reset();
-                                logger::same_line("rx: MAVLINK_MSG_ID_MANUAL_CONTROL(69) x=%04d y=%04d z=%04d r=%04d buttons=0x%02X | DISARMED           ",
+                                logger::same_line(
+                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                    " | A:IN=00 PWM=  0%% | B:IN=00 PWM=  0%% | STBY=L",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                                motors.stop();
                                 mav.send_servo_output_raw(state, 0, 0);
                             }
                             last_mc_us = now_mc;
@@ -156,11 +176,40 @@ int main()
         }
 
         uint64_t now = micros();
+
+        if (state.armed != prev_armed) {
+            if (state.armed) {
+                motors.engage();
+                logger::line("[motors] armed — driver enabled (STBY HIGH)");
+            } else {
+                motors.release();
+                slew.reset();
+                last_mc_us = 0;
+                logger::line("[motors] disarmed — driver released (STBY LOW)");
+            }
+            prev_armed = state.armed;
+        }
+
+        if (state.armed && last_mc_us > 0
+                && (now - last_mc_us) > Config::MC_TIMEOUT_US) {
+            if (!mc_timeout_active) {
+                mc_timeout_active = true;
+                last_slew_tick_us = now;
+                logger::line("[failsafe] MANUAL_CONTROL timeout — slewing to stop");
+            }
+            uint32_t elapsed_ms = static_cast<uint32_t>(
+                std::min<uint64_t>((now - last_slew_tick_us) / 1000, 500));
+            last_slew_tick_us = now;
+            DriveOutput smoothed = slew.step({0, 0}, elapsed_ms);
+            motors.set(smoothed.left, smoothed.right);
+        } else {
+            mc_timeout_active = false;
+        }
+
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
             last_hb = now;
         }
-        usleep(Config::LOOP_SLEEP_US);
     }
 }

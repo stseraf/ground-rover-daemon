@@ -1,20 +1,15 @@
-#pragma once
-
-#include <cstdio>
-
+#include "command_handlers.hpp"
+#include "camera_handlers.hpp"
 #include "mav_sender.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Waddress-of-packed-member"
-#include "common/mavlink.h"
-#pragma GCC diagnostic pop
+#include <cstdio>
 
-/* ---- individual command handlers ---- */
+namespace {
 
-inline void handle_arm_disarm(MavSender& mav, RoverState& state,
-                               const mavlink_command_long_t *cmd)
+void handle_arm_disarm(MavSender& mav, RoverState& state,
+                       const mavlink_command_long_t* cmd)
 {
     state.armed = (cmd->param1 > 0.5f);
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_COMPONENT_ARM_DISARM(400): Arm=%d",
@@ -23,56 +18,33 @@ inline void handle_arm_disarm(MavSender& mav, RoverState& state,
                          cmd->target_system, cmd->target_component);
 }
 
-inline void handle_request_message(MavSender& mav, RoverState& state,
-                                    const mavlink_command_long_t *cmd)
+void handle_request_message(MavSender& mav, RoverState& state,
+                             const mavlink_command_long_t* cmd)
 {
-    logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): ");
     auto msg_id = static_cast<uint32_t>(cmd->param1);
+    logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_MESSAGE(512): msg_id=%u", msg_id);
 
     switch (msg_id) {
         case MAVLINK_MSG_ID_SYS_STATUS:
-            std::printf("MAVLINK_MSG_ID_SYS_STATUS(1) handle\n");
             mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                                  cmd->target_system, cmd->target_component);
             mav.send_sys_status(state);
             break;
         case MAVLINK_MSG_ID_AUTOPILOT_VERSION:
-            std::printf("MAVLINK_MSG_ID_AUTOPILOT_VERSION(148) handle\n");
             mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                                  cmd->target_system, cmd->target_component);
             mav.send_autopilot_version(state);
             break;
         case MAVLINK_MSG_ID_AVAILABLE_MODES:
-            std::printf("MAVLINK_MSG_ID_AVAILABLE_MODES(435) handle requested mode=%u\n",
-                        static_cast<uint32_t>(cmd->param2));
             mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                                  cmd->target_system, cmd->target_component);
             mav.send_available_modes(state, static_cast<uint32_t>(cmd->param2));
             break;
         case MAVLINK_MSG_ID_CAMERA_INFORMATION:
-            std::printf("MAVLINK_MSG_ID_CAMERA_INFORMATION(259): MAV_RESULT_UNSUPPORTED\n");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
-            break;
-        case MAVLINK_MSG_ID_COMPONENT_METADATA:
-            std::printf("MAVLINK_MSG_ID_COMPONENT_METADATA(397): MAV_RESULT_UNSUPPORTED\n");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
-            break;
-        case MAVLINK_MSG_ID_COMPONENT_INFORMATION:
-            std::printf("MAVLINK_MSG_ID_COMPONENT_INFORMATION(395) MAV_RESULT_UNSUPPORTED\n");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
-            break;
-        case MAVLINK_MSG_ID_PROTOCOL_VERSION:
-            std::printf("MAVLINK_MSG_ID_PROTOCOL_VERSION(300): MAV_RESULT_UNSUPPORTED - Deprecated\n");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
-            break;
-        case MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION:
-            std::printf("MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION(280): MAV_RESULT_UNSUPPORTED\n");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
+        case MAVLINK_MSG_ID_CAMERA_SETTINGS:
+        case MAVLINK_MSG_ID_STORAGE_INFORMATION:
+        case MAVLINK_MSG_ID_CAMERA_CAPTURE_STATUS:
+            handle_camera_request_message(mav, state, cmd);
             break;
         default:
             std::printf("Unknown REQUEST_MESSAGE(%u): MAV_RESULT_UNSUPPORTED\n", msg_id);
@@ -82,8 +54,8 @@ inline void handle_request_message(MavSender& mav, RoverState& state,
     }
 }
 
-inline void handle_set_mode(MavSender& mav, RoverState& state,
-                             const mavlink_command_long_t *cmd)
+void handle_set_mode(MavSender& mav, RoverState& state,
+                     const mavlink_command_long_t* cmd)
 {
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_DO_SET_MODE(176): base_mode=0x%02X custom_mode=%u",
                  static_cast<uint32_t>(cmd->param1), static_cast<uint32_t>(cmd->param2));
@@ -93,10 +65,10 @@ inline void handle_set_mode(MavSender& mav, RoverState& state,
                          cmd->target_system, cmd->target_component);
 }
 
-/* ---- top-level COMMAND_LONG dispatcher ---- */
+} // namespace
 
-inline void handle_command_long(MavSender& mav, RoverState& state,
-                                 const mavlink_command_long_t *cmd)
+void handle_command_long(MavSender& mav, RoverState& state,
+                         const mavlink_command_long_t* cmd)
 {
     switch (cmd->command) {
         case MAV_CMD_COMPONENT_ARM_DISARM:
@@ -114,9 +86,11 @@ inline void handle_command_long(MavSender& mav, RoverState& state,
                                  cmd->target_system, cmd->target_component);
             break;
         case MAV_CMD_REQUEST_CAMERA_INFORMATION:
-            logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_REQUEST_CAMERA_INFORMATION(521): MAV_RESULT_UNSUPPORTED");
-            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
-                                 cmd->target_system, cmd->target_component);
+        case MAV_CMD_REQUEST_CAMERA_SETTINGS:
+        case MAV_CMD_REQUEST_STORAGE_INFORMATION:
+            logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): camera command(%u)",
+                         static_cast<uint32_t>(cmd->command));
+            handle_camera_command_long(mav, state, cmd);
             break;
         case MAV_CMD_MISSION_START:
             logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_MISSION_START(300): MAV_RESULT_UNSUPPORTED");
