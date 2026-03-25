@@ -24,7 +24,6 @@ I2cGimbalController::I2cGimbalController()
         fd_ = -1;
         return;
     }
-    center();
     logger::line("[gimbal] I2C opened %s addr=0x%02X", Config::Gimbal::I2C_BUS, Config::Gimbal::I2C_ADDR);
 }
 
@@ -55,6 +54,12 @@ void I2cGimbalController::write_frame(int16_t pan, int16_t tilt)
     buf[2] = static_cast<uint8_t>((tilt >> 8) & 0xFF);
     buf[3] = static_cast<uint8_t>( tilt       & 0xFF);
     if (write(fd_, buf, sizeof(buf)) < 0) {
-        logger::line("[gimbal] write error: %s", std::strerror(errno));
+        if (!write_error_logged_) {
+            logger::line("[gimbal] write error: %s — further errors suppressed until recovery",
+                         std::strerror(errno));
+            write_error_logged_ = true;
+        }
+    } else {
+        write_error_logged_ = false;
     }
 }
