@@ -8,18 +8,21 @@
 #include <linux/i2c-dev.h>
 #include <cerrno>
 #include <cstring>
-#include <stdexcept>
 
 I2cGimbalController::I2cGimbalController()
 {
     fd_ = open(Config::Gimbal::I2C_BUS, O_RDWR);
     if (fd_ < 0) {
-        throw std::runtime_error(std::string("gimbal: open ") +
-                                 Config::Gimbal::I2C_BUS + ": " + std::strerror(errno));
+        logger::line("[gimbal] WARNING: open %s failed: %s — gimbal disabled",
+                     Config::Gimbal::I2C_BUS, std::strerror(errno));
+        return;
     }
     if (ioctl(fd_, I2C_SLAVE, static_cast<int>(Config::Gimbal::I2C_ADDR)) < 0) {
+        logger::line("[gimbal] WARNING: I2C_SLAVE ioctl failed: %s — gimbal disabled",
+                     std::strerror(errno));
         close(fd_);
-        throw std::runtime_error(std::string("gimbal: I2C_SLAVE ioctl: ") + std::strerror(errno));
+        fd_ = -1;
+        return;
     }
     center();
     logger::line("[gimbal] I2C opened %s addr=0x%02X", Config::Gimbal::I2C_BUS, Config::Gimbal::I2C_ADDR);
@@ -27,8 +30,10 @@ I2cGimbalController::I2cGimbalController()
 
 I2cGimbalController::~I2cGimbalController()
 {
-    center();
-    close(fd_);
+    if (fd_ >= 0) {
+        center();
+        close(fd_);
+    }
 }
 
 void I2cGimbalController::set(int16_t pan, int16_t tilt)
@@ -43,6 +48,7 @@ void I2cGimbalController::center()
 
 void I2cGimbalController::write_frame(int16_t pan, int16_t tilt)
 {
+    if (fd_ < 0) return;
     uint8_t buf[4];
     buf[0] = static_cast<uint8_t>((pan  >> 8) & 0xFF);
     buf[1] = static_cast<uint8_t>( pan        & 0xFF);

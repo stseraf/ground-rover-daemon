@@ -19,7 +19,7 @@ public:
     void center() override;
 
 private:
-    int fd_;
+    int fd_ = -1;
 
     void write_frame(int16_t pan, int16_t tilt);
 };
