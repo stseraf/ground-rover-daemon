@@ -15,6 +15,12 @@ ifeq ($(DRIVER),tb6612)
   CXXFLAGS += -DDRIVER_TB6612
 endif
 
+# GIMBAL=stub (default, no deps) or GIMBAL=i2c (Linux i2c-dev, no external libs)
+GIMBAL  ?= stub
+ifeq ($(GIMBAL),i2c)
+  CXXFLAGS += -DGIMBAL_I2C
+endif
+
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
        src/mavlink/command_handlers.cpp \
@@ -24,11 +30,16 @@ ifeq ($(DRIVER),tb6612)
   SRCS += src/motor/tb6612_driver.cpp
 endif
 
+ifeq ($(GIMBAL),i2c)
+  SRCS += src/gimbal/i2c_gimbal_controller.cpp
+endif
+
 HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
           $(wildcard src/drive/*.hpp) \
-          $(wildcard src/motor/*.hpp)
+          $(wildcard src/motor/*.hpp) \
+          $(wildcard src/gimbal/*.hpp)
 
 TARGET = build/ground_rover_daemon
 
@@ -38,7 +49,7 @@ build:
 	mkdir -p build
 
 $(TARGET): $(SRCS) $(HEADERS)
-	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER)]"
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL)]"
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
 
 rebuild: clean all
@@ -46,7 +57,7 @@ rebuild: clean all
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c
 	scp $(TARGET) $(RPI):/home/pi/.
 
 clean:

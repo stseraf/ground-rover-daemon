@@ -17,6 +17,10 @@
 #ifdef DRIVER_TB6612
 #include "motor/tb6612_driver.hpp"
 #endif
+#include "gimbal/stub_gimbal_controller.hpp"
+#ifdef GIMBAL_I2C
+#include "gimbal/i2c_gimbal_controller.hpp"
+#endif
 
 static std::atomic<bool> running{true};
 
@@ -50,6 +54,11 @@ int main()
     Tb6612Driver    motors{};
 #else
     UartMotorDriver motors{};
+#endif
+#ifdef GIMBAL_I2C
+    I2cGimbalController gimbal{};
+#else
+    StubGimbalController gimbal{};
 #endif
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -112,6 +121,14 @@ int main()
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons);
                                 motors.stop();
                                 mav.send_servo_output_raw(state, 0, 0);
+                            }
+                            // Gimbal: always active regardless of arm state
+                            {
+                                auto gdz = [](int16_t v) -> int16_t {
+                                    return (v > -Config::Gimbal::DEAD_ZONE &&
+                                            v <  Config::Gimbal::DEAD_ZONE) ? 0 : v;
+                                };
+                                gimbal.set(gdz(mc.x), gdz(mc.r));
                             }
                             last_mc_us = now_mc;
                             break;

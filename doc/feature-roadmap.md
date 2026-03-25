@@ -25,24 +25,41 @@ All real-time control, MAVLink protocol, sensor I/O, and safety logic.
 
 ## Feature Backlog (Prioritized)
 
-### Priority 1 — Motor Driver Abstraction (MVP hardware control) — IN PROGRESS
-**What:** Replace stub `SERVO_OUTPUT_RAW` telemetry with real motor output.
-Two backends behind a common interface:
-- `TB6612Driver` — direct RPi GPIO PWM via `/sys/class/pwm` or pigpio
-- `UartDriver` — simple framed protocol over UART to an external motor controller
+### Priority 1 — Motor Driver Abstraction + Gimbal Control (MVP hardware control) — IN PROGRESS
+**What:** Replace stub `SERVO_OUTPUT_RAW` telemetry with real motor output, and add
+2-axis camera gimbal control via I2C to an Arduino acting as I2C slave.
+
+Motor backends behind a common `IMotorDriver` interface:
+- `TB6612Driver` — direct RPi GPIO PWM via `/sys/class/pwm` (complete)
+- `UartMotorDriver` — no-op stub; UART motor backend reserved for future use
+
+Gimbal backends behind a common `IGimbalController` interface:
+- `I2cGimbalController` — 4-byte binary write over `/dev/i2c-1` to Arduino slave
+- `StubGimbalController` — no-op stub for host/GIMBAL=stub builds
 
 **Scope:**
-- [x] Abstract `IMotorDriver` interface (`set(left, right)` in PWM µs)
-- [x] TB6612 backend; runtime selection via build flag (`DRIVER=tb6612`)
+- [x] Abstract `IMotorDriver` interface (`set(left, right)` in ±1000 axis units)
+- [x] TB6612 backend; build flag `DRIVER=tb6612`
 - [x] TB6612: PWM at 50 Hz on 2 GPIO pairs + STBY pin; driver released on disarm
-- [ ] UART backend: stub only (`UartMotorDriver` is a no-op); frame format not implemented
+- [x] `UartMotorDriver` stub retained — UART motor backend remains a future option
+- [x] Abstract `IGimbalController` interface (`set(pan, tilt)`, `center()`)
+- [ ] I2C gimbal controller: pan=`mc.x`, tilt=`mc.r`; build flag `GIMBAL=i2c`
+- [ ] I2C protocol: 4-byte big-endian int16 write to Arduino at `Config::Gimbal::I2C_ADDR`
+- [ ] Gimbal always active (not arm-gated); holds last position on MC timeout
+- [ ] `Config::Gimbal` namespace: `I2C_BUS` (`/dev/i2c-1`), `I2C_ADDR` (0x10), `DEAD_ZONE`
+
+**Arduino firmware contract:**
+- I2C slave at address `0x10` (default); receives 4-byte frames `[pan_hi][pan_lo][tilt_hi][tilt_lo]`
+- Map ±1000 → 0°–180°: `angle = (value + 1000) * 180 / 2000`
+- Buffer bytes in `Wire.onReceive()` ISR; call `Servo.write()` from `loop()` only
 
 **Also delivered in this feature:**
 - MANUAL_CONTROL 500 ms failsafe — stops motors if QGC link goes silent
 - QGC camera discovery cycle completed to stop repeated polling spam
-- Codebase restructured into topic modules (`src/motor/`, `src/mavlink/`, `src/drive/`)
+- Codebase restructured into topic modules (`src/motor/`, `src/mavlink/`, `src/drive/`, `src/gimbal/`)
 
-**Why first:** No real rover without actual motor output. Everything else is telemetry.
+**Why first:** No real rover without actual motor output. Gimbal included here as it shares
+the same MANUAL_CONTROL axis data path and requires no additional MAVLink plumbing.
 
 ---
 
@@ -102,18 +119,18 @@ Phases 3-4 are explicitly gated on their dependencies (GPS and Param Protocol re
 
 ---
 
-### Priority 4 — ELRS RX Integration (radio failsafe)
-**What:** Read CRSF (Crossfire Serial) frames from ELRS RX module over UART.
-Primary role: failsafe — if LTE/QGC link drops, ELRS takes over motor control.
+### Priority 4 — ELRS RX Integration (radio failsafe) — DEPRIORITIZED
 
-**Scope:**
+**Status:** Deprioritized. The RPi Zero 2W hardware UART (`/dev/serial0`) is allocated
+to the GPS module (Priority 5). ELRS requires a dedicated UART at 420000 baud with
+inverted logic — revisit when a USB UART adapter is added to the hardware stack.
+
+**Original scope (preserved for reference):**
 - CRSF frame parser (UART, 420000 baud, inverted logic via ELRS module)
 - Channel mapping: ch1=throttle, ch2=steering (configurable via params)
-- Control source priority logic: QGC joystick active → ignore ELRS; QGC silent >N ms → switch to ELRS
+- Control source priority: QGC active → ignore ELRS; QGC silent >N ms → switch to ELRS
 - Failsafe state: all channels at center if ELRS also drops
 - MAVLink `RC_CHANNELS` telemetry forwarded to QGC
-
-**Why fourth:** Safety-critical — rover must not run away if LTE drops.
 
 ---
 
@@ -125,6 +142,10 @@ Primary role: failsafe — if LTE/QGC link drops, ELRS takes over motor control.
 - Send `GPS_RAW_INT`, `GLOBAL_POSITION_INT` to QGC
 - Display rover position on QGC map
 - Store home position on arm for RTH reference
+
+**UART device:** `/dev/serial0` (configurable). PL011 (`/dev/ttyAMA0`) is preferred over
+mini UART (`/dev/ttyS0`) for baud rate stability. If `/dev/serial0` resolves to ttyS0,
+disable the Bluetooth overlay or remap BT to mini UART in `/boot/firmware/config.txt`.
 
 **Why fifth:** Enables position awareness in QGC; prerequisite for autopilot modes.
 
@@ -160,10 +181,10 @@ Primary role: failsafe — if LTE/QGC link drops, ELRS takes over motor control.
 
 | # | Feature | Status | Depends on |
 |---|---|---|---|
-| 1 | Motor driver abstraction (TB6612 + UART) | TB6612 done; UART stub | nothing |
+| 1 | Motor driver (TB6612) + I2C gimbal | TB6612 done; gimbal in progress | nothing |
 | 2 | MAVLink param protocol + persistence | not started | nothing |
 | 3 | Structured logging (spdlog, Phases 1-2) | not started | nothing |
-| 4 | ELRS RX + failsafe logic | not started | 1, 2 |
+| 4 | ELRS RX + failsafe logic | DEPRIORITIZED (UART conflict) | 1, 2 |
 | 5 | GPS module + MAVLink telemetry | not started | nothing |
 | 6 | LTE monitoring + failsafe | not started | 4 |
 

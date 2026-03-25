@@ -39,6 +39,14 @@ namespace Config {
         constexpr const char* GPIOCHIP = "/dev/gpiochip0";
     }
 
+    // I2C gimbal controller (2-axis: pan=mc.x, tilt=mc.r)
+    // Override I2C_BUS at compile time: make CXXFLAGS_EXTRA=-DGIMBAL_I2C_BUS='"/dev/i2c-0"'
+    namespace Gimbal {
+        constexpr const char* I2C_BUS  = "/dev/i2c-1";
+        constexpr uint8_t     I2C_ADDR = 0x10;
+        constexpr int16_t     DEAD_ZONE = 30;
+    }
+
     // Stub telemetry values
     constexpr uint16_t DUMMY_LOAD_PERMILLE  = 500;
     constexpr uint16_t DUMMY_BATTERY_MV     = 12000;
