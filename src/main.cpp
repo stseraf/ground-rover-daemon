@@ -89,7 +89,7 @@ int main()
                             if (state.armed) {
                                 uint32_t elapsed_ms = static_cast<uint32_t>(
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
-                                DriveOutput raw      = compute_diff_drive(mc.z, mc.y);
+                                DriveOutput raw      = compute_diff_drive(mc.x, mc.y);
                                 DriveOutput smoothed = slew.step(raw, elapsed_ms);
                                 int ain1 = smoothed.left  > 0 ? 1 : 0;
                                 int ain2 = smoothed.left  < 0 ? 1 : 0;

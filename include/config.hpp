@@ -20,11 +20,11 @@ namespace Config {
     // TB6612FNG motor driver
     namespace Tb6612 {
         // BCM GPIO pin numbers
-        constexpr unsigned AIN1_PIN = 26;  // Motor A (left)  direction bit 1
-        constexpr unsigned AIN2_PIN = 19;  // Motor A (left)  direction bit 2
-        constexpr unsigned BIN1_PIN = 20;  // Motor B (right) direction bit 1
-        constexpr unsigned BIN2_PIN = 21;  // Motor B (right) direction bit 2
-        constexpr unsigned STBY_PIN = 16;  // Standby — active-HIGH enables driver
+        constexpr unsigned AIN1_PIN = 20;  // Motor A (left)  direction bit 1
+        constexpr unsigned AIN2_PIN = 16;  // Motor A (left)  direction bit 2
+        constexpr unsigned BIN1_PIN = 26;  // Motor B (right) direction bit 1
+        constexpr unsigned BIN2_PIN = 19;  // Motor B (right) direction bit 2
+        constexpr unsigned STBY_PIN = 6;   // Standby — active-HIGH enables driver
 
         // Hardware PWM sysfs paths
         // Requires in /boot/firmware/config.txt:

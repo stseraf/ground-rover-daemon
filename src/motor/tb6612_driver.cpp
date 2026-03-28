@@ -61,7 +61,7 @@ Tb6612Driver::~Tb6612Driver()
 
 void Tb6612Driver::set(int16_t left, int16_t right)
 {
-    set_channel(IDX_AIN1, IDX_AIN2, fd_pwma_, dir_a_, left);
+    set_channel(IDX_AIN1, IDX_AIN2, fd_pwma_, dir_a_, -left);
     set_channel(IDX_BIN1, IDX_BIN2, fd_pwmb_, dir_b_, right);
 }
 
