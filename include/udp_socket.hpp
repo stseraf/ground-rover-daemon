@@ -26,6 +26,10 @@ public:
             std::perror("bind");
             std::exit(1);
         }
+
+        // Block until a packet arrives or 1 ms elapses — replaces usleep in the main loop
+        struct timeval tv{0, 1000};
+        ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
 
     ~UdpSocket() { if (fd_ >= 0) ::close(fd_); }
@@ -33,9 +37,9 @@ public:
     UdpSocket(const UdpSocket&)            = delete;
     UdpSocket& operator=(const UdpSocket&) = delete;
 
-    ssize_t recv_nonblocking(uint8_t* buf, size_t len, sockaddr_in& from, socklen_t& from_len)
+    ssize_t recv(uint8_t* buf, size_t len, sockaddr_in& from, socklen_t& from_len)
     {
-        return ::recvfrom(fd_, buf, len, MSG_DONTWAIT,
+        return ::recvfrom(fd_, buf, len, 0,
                           reinterpret_cast<sockaddr*>(&from), &from_len);
     }
 

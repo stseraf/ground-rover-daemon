@@ -1,8 +1,46 @@
 CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
-INC      = -Iinc -Iexternal/mavlink
+INC      = -Isrc -Iinclude -Iexternal/mavlink
 
-SRCS   = src/main.cpp
+# ARCH=host (default, x86, native g++) or ARCH=rpi (cross-compile for RPi Zero 2W)
+ARCH    ?= host
+ifeq ($(ARCH),rpi)
+  CXX      = aarch64-linux-gnu-g++
+  CXXFLAGS += -march=armv8-a
+endif
+
+# DRIVER=stub (default, no deps) or DRIVER=tb6612 (sysfs GPIO + PWM, no external libs)
+DRIVER  ?= stub
+ifeq ($(DRIVER),tb6612)
+  CXXFLAGS += -DDRIVER_TB6612
+endif
+
+# GIMBAL=stub (default, no deps) or GIMBAL=i2c (Linux i2c-dev, no external libs)
+GIMBAL  ?= stub
+ifeq ($(GIMBAL),i2c)
+  CXXFLAGS += -DGIMBAL_I2C
+endif
+
+SRCS = src/main.cpp \
+       src/mavlink/mav_sender.cpp \
+       src/mavlink/command_handlers.cpp \
+       src/mavlink/camera_handlers.cpp
+
+ifeq ($(DRIVER),tb6612)
+  SRCS += src/motor/tb6612_driver.cpp
+endif
+
+ifeq ($(GIMBAL),i2c)
+  SRCS += src/gimbal/i2c_gimbal_controller.cpp
+endif
+
+HEADERS = $(wildcard include/*.hpp) \
+          $(wildcard src/*.hpp) \
+          $(wildcard src/mavlink/*.hpp) \
+          $(wildcard src/drive/*.hpp) \
+          $(wildcard src/motor/*.hpp) \
+          $(wildcard src/gimbal/*.hpp)
+
 TARGET = build/ground_rover_daemon
 
 all: build $(TARGET)
@@ -10,8 +48,17 @@ all: build $(TARGET)
 build:
 	mkdir -p build
 
-$(TARGET): $(SRCS)
-	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC)
+$(TARGET): $(SRCS) $(HEADERS)
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL)]"
+	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
+
+rebuild: clean all
+
+# Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
+RPI ?= pi@pi-rover.lan
+deploy:
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c
+	scp $(TARGET) $(RPI):/home/pi/.
 
 clean:
 	rm -rf build
