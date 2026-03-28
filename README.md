@@ -34,18 +34,20 @@ Or if already cloned:
 git submodule update --init --recursive
 ```
 
-Two independent Makefile variables control the build:
+Three independent Makefile variables control the build:
 
-| Variable | Values | Default |
-|---|---|---|
-| `ARCH` | `host`, `rpi` | `host` |
-| `DRIVER` | `stub`, `tb6612` | `stub` |
+| Variable | Values | Default | Description |
+|---|---|---|---|
+| `ARCH` | `host`, `rpi` | `host` | Target architecture |
+| `DRIVER` | `stub`, `tb6612` | `stub` | Motor driver backend |
+| `GIMBAL` | `stub`, `i2c` | `stub` | Gimbal controller backend |
 
-| Command | Output | Requirements |
-|---|---|---|
-| `make` | x86, stub motors | nothing |
-| `make ARCH=rpi` | aarch64, stub motors | `aarch64-linux-gnu-g++` |
-| `make ARCH=rpi DRIVER=tb6612` | aarch64, TB6612 driver | `aarch64-linux-gnu-g++` only |
+| Command | Output |
+|---|---|
+| `make` | x86, stub motors, stub gimbal |
+| `make ARCH=rpi` | aarch64, stub motors, stub gimbal |
+| `make ARCH=rpi DRIVER=tb6612` | aarch64, TB6612 motors, stub gimbal |
+| `make ARCH=rpi DRIVER=tb6612 GIMBAL=i2c` | aarch64, TB6612 motors, I2C gimbal |
 
 The binary is placed at `build/ground_rover_daemon`.
 
@@ -100,6 +102,59 @@ Pin numbers are configured in `inc/config.hpp` (`Config::Tb6612` namespace). The
 ### 3. Permissions
 
 The daemon requires access to `/dev/gpiochip0` and `/sys/class/pwm/`. Run as root (`sudo`) or configure udev rules for the `gpio` group.
+
+---
+
+## RPi hardware setup (GIMBAL=i2c)
+
+The gimbal controller sends 2-axis commands over I2C to an Arduino acting as an I2C slave.
+If the I2C bus is unavailable the daemon starts normally with the gimbal silently disabled.
+
+### 1. Enable I2C
+
+Add to `/boot/firmware/config.txt` (under `[all]`):
+
+```
+dtparam=i2c_arm=on
+```
+
+Reboot, then verify the bus exists:
+
+```sh
+ls /dev/i2c-*   # should show /dev/i2c-1
+```
+
+### 2. Verify Arduino is visible
+
+With the Arduino connected and running the gimbal firmware:
+
+```sh
+sudo apt install i2c-tools   # if not already installed
+i2cdetect -y 1               # scan I2C bus 1
+```
+
+You should see a device at address `0x10` (configured in `Config::Gimbal::I2C_ADDR`).
+
+### 3. Permissions
+
+Add your user to the `i2c` group to avoid running as root:
+
+```sh
+sudo usermod -aG i2c $USER
+# log out and back in, or: newgrp i2c
+```
+
+### 4. Arduino firmware contract
+
+The Arduino must implement an I2C slave that:
+
+- Listens at address `0x10` (match `Config::Gimbal::I2C_ADDR`)
+- Receives 4-byte frames: `[pan_hi][pan_lo][tilt_hi][tilt_lo]`
+- Values are `int16_t` big-endian in range `[-1000, +1000]`
+- Maps to servo angle: `angle = (value + 1000) * 180 / 2000` (0°–180°)
+
+> **Important:** `Wire.onReceive()` runs in interrupt context on Arduino. Buffer the
+> 4 bytes in the ISR and call `Servo.write()` from `loop()` only — not from the callback.
 
 ## Running
 
