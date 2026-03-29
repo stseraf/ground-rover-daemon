@@ -11,6 +11,7 @@
 #include "rover_state.hpp"
 #include "logger.hpp"
 #include "mavlink/mav_sender.hpp"
+#include "mavlink/param_store.hpp"
 #include "mavlink/command_handlers.hpp"
 #include "drive/diff_drive.hpp"
 #include "motor/uart_motor_driver.hpp"
@@ -46,6 +47,7 @@ int main()
     std::signal(SIGTERM, handle_signal);
     UdpSocket  sock{Config::UDP_BIND_PORT};
     RoverState state{};
+    ParamStore params{};
     MavSender  mav{sock, Config::MAV_SYS_ID, Config::MAV_COMP_ID};
 
     logger::line("MAVLink rover daemon started");
@@ -98,21 +100,32 @@ int main()
                             if (state.armed) {
                                 uint32_t elapsed_ms = static_cast<uint32_t>(
                                     std::min<uint64_t>((now_mc - last_mc_us) / 1000, 500));
-                                DriveOutput raw      = compute_diff_drive(mc.x, mc.y);
-                                DriveOutput smoothed = slew.step(raw, elapsed_ms);
-                                int ain1 = smoothed.left  > 0 ? 1 : 0;
-                                int ain2 = smoothed.left  < 0 ? 1 : 0;
-                                int bin1 = smoothed.right > 0 ? 1 : 0;
-                                int bin2 = smoothed.right < 0 ? 1 : 0;
-                                int pwma = (smoothed.left  < 0 ? -smoothed.left  : smoothed.left)  / 10;
-                                int pwmb = (smoothed.right < 0 ? -smoothed.right : smoothed.right) / 10;
+                                int16_t  dead_zone = static_cast<int16_t>(params.get(0));
+                                uint32_t slew_ms   = static_cast<uint32_t>(params.get(1));
+                                DriveOutput raw      = compute_diff_drive(mc.x, mc.y, dead_zone);
+                                int16_t out_left, out_right;
+                                if (raw.left == 0 && raw.right == 0) {
+                                    slew.reset();
+                                    out_left = out_right = 0;
+                                } else {
+                                    DriveOutput smoothed = slew.step(raw, elapsed_ms, slew_ms);
+                                    int16_t trim = static_cast<int16_t>(params.get(2));
+                                    out_left  = clamp_axis(static_cast<int32_t>(smoothed.left)  + trim);
+                                    out_right = clamp_axis(static_cast<int32_t>(smoothed.right) - trim);
+                                }
+                                int ain1 = out_left  > 0 ? 1 : 0;
+                                int ain2 = out_left  < 0 ? 1 : 0;
+                                int bin1 = out_right > 0 ? 1 : 0;
+                                int bin2 = out_right < 0 ? 1 : 0;
+                                int pwma = (out_left  < 0 ? -out_left  : out_left)  / 10;
+                                int pwmb = (out_right < 0 ? -out_right : out_right) / 10;
                                 logger::same_line(
                                     "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
                                     " | A:IN=%d%d PWM=%3d%% | B:IN=%d%d PWM=%3d%% | STBY=H",
                                     mc.x, mc.y, mc.z, mc.r, mc.buttons,
                                     ain1, ain2, pwma, bin1, bin2, pwmb);
-                                motors.set(smoothed.left, smoothed.right);
-                                mav.send_servo_output_raw(state, smoothed.left, smoothed.right);
+                                motors.set(out_left, out_right);
+                                mav.send_servo_output_raw(state, out_left, out_right);
                             } else {
                                 slew.reset();
                                 logger::same_line(
@@ -124,9 +137,9 @@ int main()
                             }
                             // Gimbal: always active regardless of arm state
                             {
-                                auto gdz = [](int16_t v) -> int16_t {
-                                    return (v > -Config::Gimbal::DEAD_ZONE &&
-                                            v <  Config::Gimbal::DEAD_ZONE) ? 0 : v;
+                                int16_t gdz_val = static_cast<int16_t>(Config::Gimbal::DEAD_ZONE);
+                                auto gdz = [gdz_val](int16_t v) -> int16_t {
+                                    return (v > -gdz_val && v < gdz_val) ? 0 : v;
                                 };
                                 gimbal.set(gdz(mc.x), gdz(mc.r));
                             }
@@ -175,13 +188,37 @@ int main()
                         case MAVLINK_MSG_ID_PARAM_REQUEST_LIST: {
                             mavlink_param_request_list_t prl;
                             mavlink_msg_param_request_list_decode(&msg, &prl);
-                            logger::line("rx: MAVLINK_MSG_ID_PARAM_REQUEST_LIST(21) received target=%u:%u", prl.target_system, prl.target_component);
-                            //std::printf("MAVLINK_MSG_ID_PARAM_VALUE(22) handle\n");
-                            constexpr uint16_t param_count = 3;
-                            const char  *names[param_count]  = { "DUMMY_P1", "DUMMY_P2", "DUMMY_P3" };
-                            const float  values[param_count] = { 0.0f, 0.0f, 0.0f };
-                            for (uint16_t i = 0; i < param_count; i++)
-                                mav.send_param(state, names[i], values[i], i, param_count);
+                            logger::line("rx: MAVLINK_MSG_ID_PARAM_REQUEST_LIST(21) target=%u:%u", prl.target_system, prl.target_component);
+                            for (uint16_t i = 0; i < ParamStore::COUNT; ++i)
+                                mav.send_param(state, params.name(i), params.get(i), i, ParamStore::COUNT);
+                            break;
+                        }
+                        case MAVLINK_MSG_ID_PARAM_REQUEST_READ: {
+                            mavlink_param_request_read_t prr;
+                            mavlink_msg_param_request_read_decode(&msg, &prr);
+                            int idx = (prr.param_index >= 0)
+                                      ? prr.param_index
+                                      : params.find_by_name(prr.param_id);
+                            if (idx >= 0 && idx < ParamStore::COUNT)
+                                mav.send_param(state, params.name(idx), params.get(idx),
+                                               static_cast<uint16_t>(idx), ParamStore::COUNT);
+                            else
+                                logger::line("rx: PARAM_REQUEST_READ(20): unknown param");
+                            break;
+                        }
+                        case MAVLINK_MSG_ID_PARAM_SET: {
+                            mavlink_param_set_t ps;
+                            mavlink_msg_param_set_decode(&msg, &ps);
+                            int idx = params.find_by_name(ps.param_id);
+                            if (idx >= 0) {
+                                params.set(static_cast<uint16_t>(idx), ps.param_value);
+                                params.save(Config::PARAM_FILE);
+                                mav.send_param(state, params.name(idx), params.get(idx),
+                                               static_cast<uint16_t>(idx), ParamStore::COUNT);
+                                logger::line("rx: PARAM_SET(23): %s=%.4f saved", params.name(idx), ps.param_value);
+                            } else {
+                                logger::line("rx: PARAM_SET(23): unknown param %.16s", ps.param_id);
+                            }
                             break;
                         }
                         default:
@@ -207,8 +244,9 @@ int main()
             prev_armed = state.armed;
         }
 
+        uint64_t mc_timeout_us = static_cast<uint64_t>(params.get(3)) * 1000;
         if (state.armed && last_mc_us > 0
-                && (now - last_mc_us) > Config::MC_TIMEOUT_US) {
+                && (now - last_mc_us) > mc_timeout_us) {
             if (!mc_timeout_active) {
                 mc_timeout_active = true;
                 last_slew_tick_us = now;
@@ -217,8 +255,11 @@ int main()
             uint32_t elapsed_ms = static_cast<uint32_t>(
                 std::min<uint64_t>((now - last_slew_tick_us) / 1000, 500));
             last_slew_tick_us = now;
-            DriveOutput smoothed = slew.step({0, 0}, elapsed_ms);
-            motors.set(smoothed.left, smoothed.right);
+            uint32_t slew_ms = static_cast<uint32_t>(params.get(1));
+            DriveOutput smoothed = slew.step({0, 0}, elapsed_ms, slew_ms);
+            int16_t trim = static_cast<int16_t>(params.get(2));
+            motors.set(clamp_axis(static_cast<int32_t>(smoothed.left)  + trim),
+                       clamp_axis(static_cast<int32_t>(smoothed.right) - trim));
         } else {
             mc_timeout_active = false;
         }

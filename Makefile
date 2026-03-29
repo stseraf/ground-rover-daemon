@@ -23,6 +23,7 @@ endif
 
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
+       src/mavlink/param_store.cpp \
        src/mavlink/command_handlers.cpp \
        src/mavlink/camera_handlers.cpp
 
