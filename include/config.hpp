@@ -47,6 +47,8 @@ namespace Config {
         constexpr int16_t     DEAD_ZONE = 30;
     }
 
+    constexpr const char* PARAM_FILE = "params"; // relative to CWD (binary directory)
+
     // Stub telemetry values
     constexpr uint16_t DUMMY_LOAD_PERMILLE  = 500;
     constexpr uint16_t DUMMY_BATTERY_MV     = 12000;

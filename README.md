@@ -1,21 +1,21 @@
 # Ground Rover Daemon
 
-A MAVLink UDP daemon that acts as a simulated ground rover autopilot, allowing [QGroundControl](https://qgroundcontrol.com/) to connect and send joystick commands via `MANUAL_CONTROL` messages.
-
-It implements enough of the MAVLink protocol for QGC to recognise the vehicle, arm/disarm it, switch flight modes, and stream joystick input — without requiring real hardware.
+A MAVLink UDP daemon that connects [QGroundControl](https://qgroundcontrol.com/) to a differential-drive ground rover. QGC sends joystick input via `MANUAL_CONTROL` messages; the daemon drives a TB6612FNG H-bridge and optionally a 2-axis I2C gimbal.
 
 ## How it works
 
 - Binds a UDP socket on port **14550** (the standard QGC port)
 - Sends periodic `HEARTBEAT` and `SYS_STATUS` telemetry at 1 Hz
-- Responds to `COMMAND_LONG`, `SET_MODE`, `PARAM_REQUEST_LIST`, and `MISSION_REQUEST_LIST` messages
+- Handles arm/disarm, mode switching, joystick input, and parameter read/write
+- Applies dead zone, slew-rate limiting, and motor trim to joystick axes before driving motors
+- Stops motors and slews to zero if no `MANUAL_CONTROL` arrives within the configured timeout (failsafe)
 - Logs all traffic to stdout with a monotonic timestamp
 
 ## Requirements
 
 - C++17 compiler (GCC or Clang)
 - `make`
-- For `ARCH=rpi`: cross-compiler (RPi Zero 2W runs 64-bit aarch64 OS):
+- For `ARCH=rpi`: cross-compiler (RPi Zero 2W runs 64-bit aarch64):
   ```sh
   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
   ```
@@ -51,8 +51,6 @@ Three independent Makefile variables control the build:
 
 The binary is placed at `build/ground_rover_daemon`.
 
-GPIO and PWM are accessed via Linux sysfs (`/sys/class/gpio`, `/sys/class/pwm`) — no external libraries required.
-
 ## Deploying to RPi
 
 The `deploy` target builds for RPi and copies the binary over SSH in one step:
@@ -73,6 +71,38 @@ echo 'export RPI=pi@pi-rover.lan' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+## Running
+
+Run the daemon from its own directory so the `params` file is written alongside the binary:
+
+```sh
+cd /path/to/binary
+sudo ./ground_rover_daemon
+```
+
+Then open QGroundControl — it will auto-connect on UDP port 14550.
+
+## Runtime parameters
+
+The daemon exposes 4 tunable parameters via the MAVLink parameter protocol. QGC shows them in the **Parameters** panel; values are saved to a `params` file next to the binary and survive restarts.
+
+| # | Name | Default | Description |
+|---|---|---|---|
+| 0 | `DRIVE_DEAD_ZONE` | 30 | Joystick dead zone (axis units, 0–1000) |
+| 1 | `DRIVE_SLEW_MS` | 500 | Slew-rate ramp time from stop to full speed (ms) |
+| 2 | `DRIVE_TRIM` | 0 | Motor balance offset — positive shifts power to left motor, negative to right |
+| 3 | `CTRL_TIMEOUT_MS` | 500 | Failsafe: stop motors after this many ms with no joystick input |
+
+`params` file format (plain text, editable by hand):
+```
+DRIVE_DEAD_ZONE=30
+DRIVE_SLEW_MS=500
+DRIVE_TRIM=0
+CTRL_TIMEOUT_MS=500
+```
+
+---
+
 ## RPi hardware setup (DRIVER=tb6612)
 
 ### 1. Enable hardware PWM
@@ -80,16 +110,11 @@ source ~/.bashrc
 Add to `/boot/firmware/config.txt` (under `[all]`):
 
 ```
-dtoverlay=pwm-2chan
-```
-
-Also disable audio to avoid GPIO18 conflict (PWM0 shares GPIO18 with audio):
-
-```
+dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
 dtparam=audio=off
 ```
 
-Reboot, then verify:
+`audio=off` avoids a GPIO18 conflict. Reboot, then verify:
 ```sh
 ls /sys/class/pwm/pwmchip0/   # should exist
 cat /sys/class/pwm/pwmchip0/npwm  # should print 2
@@ -97,7 +122,15 @@ cat /sys/class/pwm/pwmchip0/npwm  # should print 2
 
 ### 2. GPIO pin wiring
 
-Pin numbers are configured in `inc/config.hpp` (`Config::Tb6612` namespace). The current values are placeholders — fill in actual BCM pin numbers to match your wiring before running.
+| Signal | BCM pin |
+|--------|---------|
+| AIN1 (Motor A / left, dir bit 1) | GPIO 20 |
+| AIN2 (Motor A / left, dir bit 2) | GPIO 16 |
+| BIN1 (Motor B / right, dir bit 1) | GPIO 26 |
+| BIN2 (Motor B / right, dir bit 2) | GPIO 19 |
+| STBY (standby, active-HIGH) | GPIO 6 |
+| PWMA (Motor A speed) | GPIO 12 (PWM0) |
+| PWMB (Motor B speed) | GPIO 13 (PWM1) |
 
 ### 3. Permissions
 
@@ -107,7 +140,7 @@ The daemon requires access to `/dev/gpiochip0` and `/sys/class/pwm/`. Run as roo
 
 ## RPi hardware setup (GIMBAL=i2c)
 
-The gimbal controller sends 2-axis commands over I2C to an Arduino acting as an I2C slave.
+The gimbal controller sends 2-axis pan/tilt commands over I2C to an Arduino acting as an I2C slave.
 If the I2C bus is unavailable the daemon starts normally with the gimbal silently disabled.
 
 ### 1. Enable I2C
@@ -118,15 +151,13 @@ Add to `/boot/firmware/config.txt` (under `[all]`):
 dtparam=i2c_arm=on
 ```
 
-Reboot, then verify the bus exists:
+Reboot, then verify:
 
 ```sh
 ls /dev/i2c-*   # should show /dev/i2c-1
 ```
 
 ### 2. Verify Arduino is visible
-
-With the Arduino connected and running the gimbal firmware:
 
 ```sh
 sudo apt install i2c-tools   # if not already installed
@@ -156,37 +187,39 @@ The Arduino must implement an I2C slave that:
 > **Important:** `Wire.onReceive()` runs in interrupt context on Arduino. Buffer the
 > 4 bytes in the ISR and call `Servo.write()` from `loop()` only — not from the callback.
 
-## Running
-
-```sh
-sudo ./ground_rover_daemon
-```
-
-Then open QGroundControl — it will auto-connect on UDP port 14550.
+---
 
 ## Project structure
 
 ```
-src/                    # compiled sources
-  main.cpp              # event loop
-inc/                    # project headers
-  config.hpp            # compile-time constants (pins, PWM paths, MAVLink IDs)
-  motor_driver.hpp      # IMotorDriver interface
-  tb6612_driver.hpp     # TB6612 H-bridge driver (libgpiod 2.x + sysfs PWM)
-  uart_motor_driver.hpp # no-op stub driver (host builds)
-  udp_socket.hpp        # RAII UDP socket wrapper
-  rover_state.hpp       # mutable daemon state struct
-  logger.hpp            # timestamped stdout logging
-  mav_sender.hpp        # MAVLink TX methods
-  command_handlers.hpp  # incoming command dispatch
+src/
+  main.cpp                       # main event loop
+  drive/
+    diff_drive.hpp               # dead zone, slew, differential mixing
+  motor/
+    uart_motor_driver.hpp/.cpp   # no-op stub (host builds)
+    tb6612_driver.hpp/.cpp       # TB6612 H-bridge (gpio_v2 ioctl + sysfs PWM)
+  gimbal/
+    stub_gimbal_controller.hpp   # no-op stub
+    i2c_gimbal_controller.hpp/.cpp  # I2C 2-axis gimbal
+  mavlink/
+    mav_sender.hpp/.cpp          # MAVLink TX helpers
+    param_store.hpp/.cpp         # runtime parameter store (file-backed)
+    command_handlers.hpp/.cpp    # COMMAND_LONG dispatch
+    camera_handlers.hpp/.cpp     # camera stub responses
+include/
+  config.hpp                     # compile-time constants (pins, PWM, MAVLink IDs)
+  udp_socket.hpp                 # RAII UDP socket wrapper
+  rover_state.hpp                # mutable daemon state struct
+  logger.hpp                     # timestamped stdout logging
 external/
-  mavlink/              # MAVLink C library (submodule)
-build/                  # build output (gitignored)
+  mavlink/                       # MAVLink C library (submodule)
+build/                           # build output (gitignored)
 ```
 
-## Configuration
+## Compile-time configuration
 
-All tunable constants are in `inc/config.hpp`:
+All hardware constants are in `include/config.hpp`:
 
 | Constant | Default | Description |
 |---|---|---|
@@ -194,10 +227,9 @@ All tunable constants are in `inc/config.hpp`:
 | `MAV_COMP_ID` | `1` | MAVLink component ID |
 | `UDP_BIND_PORT` | `14550` | UDP port to bind |
 | `HEARTBEAT_INTERVAL_US` | `1 000 000` | Heartbeat period (µs) |
-| `LOOP_SLEEP_US` | `1 000` | Main loop sleep (µs) |
-| `Config::Tb6612::AIN1_PIN` | `0` (placeholder) | BCM pin for Motor A direction bit 1 |
-| `Config::Tb6612::AIN2_PIN` | `0` (placeholder) | BCM pin for Motor A direction bit 2 |
-| `Config::Tb6612::BIN1_PIN` | `0` (placeholder) | BCM pin for Motor B direction bit 1 |
-| `Config::Tb6612::BIN2_PIN` | `0` (placeholder) | BCM pin for Motor B direction bit 2 |
-| `Config::Tb6612::STBY_PIN` | `0` (placeholder) | BCM pin for TB6612 standby |
-| `Config::Tb6612::PWM_PERIOD_NS` | `25000` | PWM period in ns (40 kHz) |
+| `DRIVE_DEAD_ZONE` | `30` | Default dead zone (overridable at runtime) |
+| `DRIVE_SLEW_TIME_MS` | `500` | Default slew time (overridable at runtime) |
+| `MC_TIMEOUT_US` | `500 000` | Default failsafe timeout (overridable at runtime) |
+| `Tb6612::PWM_PERIOD_NS` | `20 000 000` | PWM period — 50 Hz |
+| `Gimbal::I2C_BUS` | `/dev/i2c-1` | I2C bus path (override at compile time) |
+| `Gimbal::I2C_ADDR` | `0x10` | Arduino I2C slave address |
