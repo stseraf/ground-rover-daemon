@@ -8,6 +8,8 @@
 #include "common/mavlink.h"
 #pragma GCC diagnostic pop
 
+#include "gps_fix.hpp"
+
 struct RoverState {
     bool        armed           = false;
     uint8_t     base_mode       = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
@@ -15,4 +17,8 @@ struct RoverState {
     sockaddr_in qgc_addr        = {};
     socklen_t   qgc_addr_len    = sizeof(sockaddr_in);
     bool        qgc_known       = false;
+
+    GpsFix  current_fix{};
+    int32_t home_alt_mm = 0;    // altitude at first valid fix, mm MSL
+    bool    home_set    = false;
 };

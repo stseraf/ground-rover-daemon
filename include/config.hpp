@@ -47,6 +47,12 @@ namespace Config {
         constexpr int16_t     DEAD_ZONE = 30;
     }
 
+    // GPS module (GY-GPS6MV2 / u-blox NEO-6M, NMEA 0183 over UART)
+    namespace Gps {
+        constexpr const char* UART_DEV  = "/dev/serial0";
+        constexpr int         BAUD_RATE = 9600;
+    }
+
     constexpr const char* PARAM_FILE = "params"; // relative to CWD (binary directory)
 
     // Stub telemetry values

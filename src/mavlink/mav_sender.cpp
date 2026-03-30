@@ -1,7 +1,9 @@
 #include "mav_sender.hpp"
 
 #include <cstring>
+#include <cmath>
 #include <array>
+#include <climits>
 
 #include "config.hpp"
 #include "logger.hpp"
@@ -180,6 +182,53 @@ void MavSender::send_param(const RoverState& state, const char* name, float valu
         name, value, MAV_PARAM_TYPE_REAL32, total, index);
     logger::line("tx: MAVLINK_MSG_ID_PARAM_VALUE(22): %s=%.2f (%u/%u)",
                  name, value, index + 1, total);
+    send(msg, state);
+}
+
+void MavSender::send_gps_raw_int(const RoverState& state)
+{
+    const GpsFix& f = state.current_fix;
+    mavlink_message_t msg;
+    mavlink_gps_raw_int_t g{};
+    g.time_usec          = f.time_usec;
+    g.fix_type           = f.fix_type;
+    g.lat                = f.lat_degE7;
+    g.lon                = f.lon_degE7;
+    g.alt                = f.alt_mm;
+    g.eph                = f.hdop_100;
+    g.epv                = UINT16_MAX;   // not available from NMEA
+    g.vel                = f.vel_cm_s;
+    g.cog                = f.cog_cdeg;
+    g.satellites_visible = f.satellites;
+    g.alt_ellipsoid      = 0;
+    g.h_acc              = UINT32_MAX;   // not available
+    g.v_acc              = UINT32_MAX;
+    g.vel_acc            = UINT32_MAX;
+    g.hdg_acc            = UINT32_MAX;
+    g.yaw                = 0;
+    mavlink_msg_gps_raw_int_encode(sys_id_, comp_id_, &msg, &g);
+    send(msg, state);
+}
+
+void MavSender::send_global_position_int(const RoverState& state)
+{
+    const GpsFix& f = state.current_fix;
+    mavlink_message_t msg;
+
+    // Decompose ground speed into north/east components (cm/s)
+    float cog_rad = static_cast<float>(f.cog_cdeg) * (float)M_PI / 18000.0f;
+    int16_t vx = static_cast<int16_t>(static_cast<float>(f.vel_cm_s) *  cosf(cog_rad));
+    int16_t vy = static_cast<int16_t>(static_cast<float>(f.vel_cm_s) *  sinf(cog_rad));
+
+    mavlink_msg_global_position_int_pack(sys_id_, comp_id_, &msg,
+        0,                                    // time_boot_ms (unused — no boot time counter)
+        f.lat_degE7,
+        f.lon_degE7,
+        f.alt_mm,
+        f.alt_mm - state.home_alt_mm,         // relative_alt
+        vx, vy,
+        0,                                    // vz = 0 (ground rover)
+        f.cog_cdeg);                          // hdg ≈ course over ground
     send(msg, state);
 }
 

@@ -22,6 +22,10 @@
 #ifdef GIMBAL_I2C
 #include "gimbal/i2c_gimbal_controller.hpp"
 #endif
+#include "gps/stub_gps_provider.hpp"
+#ifdef GPS_NMEA
+#include "gps/nmea_gps_provider.hpp"
+#endif
 
 static std::atomic<bool> running{true};
 
@@ -61,6 +65,11 @@ int main()
     I2cGimbalController gimbal{};
 #else
     StubGimbalController gimbal{};
+#endif
+#ifdef GPS_NMEA
+    NmeaGpsProvider gps{Config::Gps::UART_DEV, Config::Gps::BAUD_RATE};
+#else
+    StubGpsProvider gps{};
 #endif
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -229,6 +238,15 @@ int main()
             }
         }
 
+        gps.update();
+        state.current_fix = gps.fix();
+        if (!state.home_set && state.current_fix.valid) {
+            state.home_alt_mm = state.current_fix.alt_mm;
+            state.home_set    = true;
+            logger::line("[gps] home altitude set: %.1f m MSL",
+                         state.home_alt_mm / 1000.0);
+        }
+
         uint64_t now = micros();
 
         if (state.armed != prev_armed) {
@@ -268,6 +286,8 @@ int main()
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
             mav.send_current_mode(state);
+            mav.send_gps_raw_int(state);
+            mav.send_global_position_int(state);
             last_hb = now;
         }
     }

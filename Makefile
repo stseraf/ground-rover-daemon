@@ -21,6 +21,12 @@ ifeq ($(GIMBAL),i2c)
   CXXFLAGS += -DGIMBAL_I2C
 endif
 
+# GPS=stub (default, no deps) or GPS=nmea (UART NMEA parser for GY-GPS6MV2 / NEO-6M)
+GPS     ?= stub
+ifeq ($(GPS),nmea)
+  CXXFLAGS += -DGPS_NMEA
+endif
+
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
        src/mavlink/param_store.cpp \
@@ -35,12 +41,18 @@ ifeq ($(GIMBAL),i2c)
   SRCS += src/gimbal/i2c_gimbal_controller.cpp
 endif
 
+ifeq ($(GPS),nmea)
+  SRCS += src/gps/nmea_gps_provider.cpp
+endif
+
 HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
           $(wildcard src/drive/*.hpp) \
           $(wildcard src/motor/*.hpp) \
-          $(wildcard src/gimbal/*.hpp)
+          $(wildcard src/gimbal/*.hpp) \
+          $(wildcard src/gps/*.hpp) \
+          $(wildcard include/gps_fix.hpp)
 
 TARGET = build/ground_rover_daemon
 
@@ -50,7 +62,7 @@ build:
 	mkdir -p build
 
 $(TARGET): $(SRCS) $(HEADERS)
-	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL)]"
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS)]"
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
 
 rebuild: clean all
@@ -58,7 +70,7 @@ rebuild: clean all
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c GPS=nmea
 	scp $(TARGET) $(RPI):/home/pi/.
 
 clean:
