@@ -13,11 +13,14 @@ public:
 
     void update() override;
     const GpsFix& fix() const override { return fix_; }
+    void set_raw_log(bool v) { raw_log_ = v; }
 
 private:
     void on_sentence(const char* line);
     void parse_gprmc(const char* line);
     void parse_gpgga(const char* line);
+    void parse_gsv(const char* line);
+    void parse_gntxt(const char* line);
 
     int    fd_  = -1;
     GpsFix fix_{};
@@ -33,6 +36,16 @@ private:
     uint16_t rmc_cog_   = 0;
     bool     rmc_valid_ = false;
     bool     rmc_seen_  = false;
+
+    bool     raw_log_         = false;
+
+    // Visible satellite tracking (from GSV sentences)
+    uint8_t  vis_gps_         = 0;
+    uint8_t  vis_glo_         = 0;
+    uint8_t  prev_vis_total_  = 255;  // 255 = not yet logged
+
+    // Antenna status tracking (from GNTXT sentences)
+    char     prev_ant_status_[16] = {};
 
     // State-change tracking (for event logging)
     uint8_t  prev_sats_       = 255;  // 255 = not yet logged

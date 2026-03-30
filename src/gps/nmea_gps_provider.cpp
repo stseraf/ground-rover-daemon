@@ -150,11 +150,15 @@ void NmeaGpsProvider::update()
 
 void NmeaGpsProvider::on_sentence(const char* line)
 {
-    logger::line("[gps] %s", line);
+    if (raw_log_) logger::line("[gps] %s", line);
     if (strncmp(line, "$GPRMC", 6) == 0 || strncmp(line, "$GNRMC", 6) == 0)
         parse_gprmc(line);
     else if (strncmp(line, "$GPGGA", 6) == 0 || strncmp(line, "$GNGGA", 6) == 0)
         parse_gpgga(line);
+    else if (strncmp(line, "$GPGSV", 6) == 0 || strncmp(line, "$GLGSV", 6) == 0)
+        parse_gsv(line);
+    else if (strncmp(line, "$GNTXT", 6) == 0)
+        parse_gntxt(line);
 }
 
 // $GPRMC,HHMMSS.ss,A,DDMM.MMMM,N,DDDMM.MMMM,E,speed_kn,cog_deg,DDMMYY,,,*cs
@@ -179,6 +183,56 @@ void NmeaGpsProvider::parse_gprmc(const char* line)
     rmc_cog_ = static_cast<uint16_t>(atof(f[8]) * 100.0);
 
     rmc_seen_ = true;
+}
+
+// $GPGSV / $GLGSV — track total visible satellite count from field 3, sentence 1 only
+void NmeaGpsProvider::parse_gsv(const char* line)
+{
+    char buf[BUF_LEN];
+    strncpy(buf, line, BUF_LEN - 1);
+    buf[BUF_LEN - 1] = '\0';
+
+    char* f[6];
+    if (split_fields(buf, f, 6) < 4) return;
+
+    // Only process the first sentence of each group (sentence_num == 1)
+    if (atoi(f[2]) != 1) return;
+
+    uint8_t total = static_cast<uint8_t>(atoi(f[3]));
+    if (strncmp(line, "$GPGSV", 6) == 0)
+        vis_gps_ = total;
+    else
+        vis_glo_ = total;
+
+    uint8_t vis_total = vis_gps_ + vis_glo_;
+    if (vis_total != prev_vis_total_) {
+        logger::line("[gps] visible satellites: %u  (GPS=%u GLONASS=%u)",
+                     vis_total, vis_gps_, vis_glo_);
+        prev_vis_total_ = vis_total;
+    }
+}
+
+// $GNTXT — log antenna status changes and firmware model on boot
+void NmeaGpsProvider::parse_gntxt(const char* line)
+{
+    char buf[BUF_LEN];
+    strncpy(buf, line, BUF_LEN - 1);
+    buf[BUF_LEN - 1] = '\0';
+
+    char* f[6];
+    if (split_fields(buf, f, 6) < 5) return;
+    const char* text = f[4];
+
+    if (strncmp(text, "ANTSTATUS=", 10) == 0) {
+        const char* status = text + 10;
+        if (strncmp(status, prev_ant_status_, 15) != 0) {
+            logger::line("[gps] antenna: %s", status);
+            strncpy(prev_ant_status_, status, 15);
+            prev_ant_status_[15] = '\0';
+        }
+    } else if (strncmp(text, "MOD=", 4) == 0) {
+        logger::line("[gps] module: %s", text + 4);
+    }
 }
 
 // $GPGGA,HHMMSS.ss,DDMM.MMMM,N,DDDMM.MMMM,E,Q,sats,hdop,alt,M,...*cs

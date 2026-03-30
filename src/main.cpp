@@ -239,6 +239,9 @@ int main()
         }
 
         gps.update();
+#ifdef GPS_NMEA
+        gps.set_raw_log(params.get(4) != 0.0f);
+#endif
         state.current_fix = gps.fix();
         if (!state.home_set && state.current_fix.valid) {
             state.home_alt_mm = state.current_fix.alt_mm;
