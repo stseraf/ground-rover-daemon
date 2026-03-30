@@ -12,6 +12,7 @@ ParamStore::ParamStore()
     params_[1] = {"DRIVE_SLEW_MS",   static_cast<float>(Config::DRIVE_SLEW_TIME_MS)};
     params_[2] = {"DRIVE_TRIM",      0.0f};
     params_[3] = {"CTRL_TIMEOUT_MS", static_cast<float>(Config::MC_TIMEOUT_US / 1000)};
+    params_[4] = {"GPS_RAW_LOG",     0.0f};
     load(Config::PARAM_FILE);
 }
 

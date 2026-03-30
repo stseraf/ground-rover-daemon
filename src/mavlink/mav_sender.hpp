@@ -32,6 +32,9 @@ public:
     void send_param(const RoverState& state, const char* name, float value,
                     uint16_t index, uint16_t total);
 
+    void send_gps_raw_int(const RoverState& state);
+    void send_global_position_int(const RoverState& state);
+
 private:
     void send(mavlink_message_t& msg, const RoverState& state);
 
