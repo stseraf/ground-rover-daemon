@@ -1,6 +1,8 @@
 #include "param_store.hpp"
 
+#include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "config.hpp"
@@ -41,7 +43,9 @@ void ParamStore::load(const char* path)
         }
     }
     std::fclose(fp);
-    logger::line("[params] loaded from %s", path);
+    char abspath[PATH_MAX];
+    const char* display = realpath(path, abspath) ? abspath : path;
+    logger::line("[params] loaded from %s", display);
 }
 
 void ParamStore::save(const char* path) const
@@ -54,5 +58,7 @@ void ParamStore::save(const char* path) const
     for (uint16_t i = 0; i < COUNT; ++i)
         std::fprintf(fp, "%s=%.6g\n", params_[i].name, params_[i].value);
     std::fclose(fp);
-    logger::line("[params] saved to %s", path);
+    char abspath[PATH_MAX];
+    const char* display = realpath(path, abspath) ? abspath : path;
+    logger::line("[params] saved to %s", display);
 }
