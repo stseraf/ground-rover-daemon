@@ -70,8 +70,13 @@ rebuild: clean all
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c GPS=nmea
-	scp $(TARGET) $(RPI):/home/pi/.
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea
+	ssh $(RPI) "mkdir -p /home/pi/ground-rover-daemon && sudo systemctl stop ground-rover-daemon || true"
+	scp $(TARGET) $(RPI):/home/pi/ground-rover-daemon/
+	scp deploy/ground-rover-daemon.service $(RPI):/tmp/
+	ssh $(RPI) "sudo mv /tmp/ground-rover-daemon.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ground-rover-daemon"
 
 clean:
 	rm -rf build
+
+.PHONY: all build rebuild deploy clean

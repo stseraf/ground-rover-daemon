@@ -56,7 +56,7 @@ The binary is placed at `build/ground_rover_daemon`.
 
 ## Deploying to RPi
 
-The `deploy` target builds for RPi and copies the binary over SSH in one step:
+The `deploy` target builds for RPi, copies the binary to `/home/pi/ground-rover-daemon/`, and installs and enables the systemd service — all in one step:
 
 ```sh
 make deploy
@@ -76,11 +76,23 @@ source ~/.bashrc
 
 ## Running
 
-Run the daemon from its own directory so the `params` file is written alongside the binary:
+After `make deploy` the daemon starts automatically on boot via systemd. To manage it:
 
 ```sh
-cd /path/to/binary
-sudo ./ground_rover_daemon
+sudo systemctl start ground-rover-daemon    # start now
+sudo systemctl stop ground-rover-daemon     # stop
+sudo systemctl restart ground-rover-daemon  # restart
+systemctl status ground-rover-daemon        # check status
+journalctl -u ground-rover-daemon -f        # follow logs
+```
+
+The service runs as `pi` with `WorkingDirectory=/home/pi/ground-rover-daemon/`, so the `params` file is written there.
+
+To run manually (e.g. for debugging):
+
+```sh
+cd /home/pi/ground-rover-daemon
+./ground_rover_daemon
 ```
 
 Then open QGroundControl — it will auto-connect on UDP port 14550.
@@ -275,6 +287,8 @@ include/
   logger.hpp                     # timestamped stdout logging
 external/
   mavlink/                       # MAVLink C library (submodule)
+deploy/
+  ground-rover-daemon.service    # systemd unit file (installed by make deploy)
 build/                           # build output (gitignored)
 ```
 

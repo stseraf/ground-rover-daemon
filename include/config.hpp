@@ -53,7 +53,7 @@ namespace Config {
         constexpr int         BAUD_RATE = 9600;
     }
 
-    constexpr const char* PARAM_FILE = "params"; // relative to CWD (binary directory)
+    constexpr const char* PARAM_FILE = "params"; // relative to WorkingDirectory
 
     // Stub telemetry values
     constexpr uint16_t DUMMY_LOAD_PERMILLE  = 500;

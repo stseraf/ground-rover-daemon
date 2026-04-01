@@ -54,7 +54,12 @@ int main()
     ParamStore params{};
     MavSender  mav{sock, Config::MAV_SYS_ID, Config::MAV_COMP_ID};
 
-    logger::line("MAVLink rover daemon started");
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_BOOTTIME, &ts);
+        logger::line("MAVLink rover daemon started at %lds%03ldms since boot",
+                     ts.tv_sec, ts.tv_nsec / 1000000);
+    }
 
 #ifdef DRIVER_TB6612
     Tb6612Driver    motors{};
@@ -122,25 +127,25 @@ int main()
                                     out_left  = clamp_axis(static_cast<int32_t>(smoothed.left)  + trim);
                                     out_right = clamp_axis(static_cast<int32_t>(smoothed.right) - trim);
                                 }
-                                int ain1 = out_left  > 0 ? 1 : 0;
-                                int ain2 = out_left  < 0 ? 1 : 0;
-                                int bin1 = out_right > 0 ? 1 : 0;
-                                int bin2 = out_right < 0 ? 1 : 0;
-                                int pwma = (out_left  < 0 ? -out_left  : out_left)  / 10;
-                                int pwmb = (out_right < 0 ? -out_right : out_right) / 10;
-                                logger::same_line(
-                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
-                                    " | A:IN=%d%d PWM=%3d%% | B:IN=%d%d PWM=%3d%% | STBY=H",
-                                    mc.x, mc.y, mc.z, mc.r, mc.buttons,
-                                    ain1, ain2, pwma, bin1, bin2, pwmb);
+                                // int ain1 = out_left  > 0 ? 1 : 0;
+                                // int ain2 = out_left  < 0 ? 1 : 0;
+                                // int bin1 = out_right > 0 ? 1 : 0;
+                                // int bin2 = out_right < 0 ? 1 : 0;
+                                // int pwma = (out_left  < 0 ? -out_left  : out_left)  / 10;
+                                // int pwmb = (out_right < 0 ? -out_right : out_right) / 10;
+                                // logger::same_line(
+                                //     "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                //     " | A:IN=%d%d PWM=%3d%% | B:IN=%d%d PWM=%3d%% | STBY=H",
+                                //     mc.x, mc.y, mc.z, mc.r, mc.buttons,
+                                //     ain1, ain2, pwma, bin1, bin2, pwmb);
                                 motors.set(out_left, out_right);
                                 mav.send_servo_output_raw(state, out_left, out_right);
                             } else {
                                 slew.reset();
-                                logger::same_line(
-                                    "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
-                                    " | A:IN=00 PWM=  0%% | B:IN=00 PWM=  0%% | STBY=L",
-                                    mc.x, mc.y, mc.z, mc.r, mc.buttons);
+                                // logger::same_line(
+                                //     "rx: MC(69) x=%5d y=%5d z=%5d r=%5d btn=0x%02X"
+                                //     " | A:IN=00 PWM=  0%% | B:IN=00 PWM=  0%% | STBY=L",
+                                //     mc.x, mc.y, mc.z, mc.r, mc.buttons);
                                 motors.stop();
                                 mav.send_servo_output_raw(state, 0, 0);
                             }
