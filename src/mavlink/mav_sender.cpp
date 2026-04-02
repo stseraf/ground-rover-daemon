@@ -232,6 +232,47 @@ void MavSender::send_global_position_int(const RoverState& state)
     send(msg, state);
 }
 
+void MavSender::send_cellular_status(const RoverState& state)
+{
+    if (!state.qgc_known)
+        return;
+
+    mavlink_message_t msg;
+    mavlink_cellular_status_t cs{};
+
+    cs.mcc = UINT16_MAX;  // unknown
+    cs.mnc = UINT16_MAX;
+    cs.lac = 0;
+
+    // Map netmode string to MAVLink radio type enum
+    const char* nm = state.lte.netmode;
+    if (::strncmp(nm, "LTE", 3) == 0)
+        cs.type = CELLULAR_NETWORK_RADIO_TYPE_LTE;
+    else if (::strncmp(nm, "3G", 2) == 0 || ::strncmp(nm, "WCDMA", 5) == 0)
+        cs.type = CELLULAR_NETWORK_RADIO_TYPE_WCDMA;
+    else if (::strncmp(nm, "2G", 2) == 0 || ::strncmp(nm, "GSM", 3) == 0)
+        cs.type = CELLULAR_NETWORK_RADIO_TYPE_GSM;
+    else
+        cs.type = CELLULAR_NETWORK_RADIO_TYPE_NONE;
+
+    if (state.lte.connected) {
+        cs.status  = CELLULAR_STATUS_FLAG_CONNECTED;
+        cs.quality = static_cast<uint8_t>(
+            static_cast<uint32_t>(state.lte.rssi) * 100u / 31u);
+    } else if (state.lte.present) {
+        cs.status  = CELLULAR_STATUS_FLAG_REGISTERED;
+        cs.quality = 0;
+    } else {
+        cs.status  = CELLULAR_STATUS_FLAG_FAILED;
+        cs.quality = 0;
+    }
+
+    cs.failure_reason = 0;
+
+    mavlink_msg_cellular_status_encode(sys_id_, comp_id_, &msg, &cs);
+    send(msg, state);
+}
+
 void MavSender::send(mavlink_message_t& msg, const RoverState& state)
 {
     uint8_t buf[MAVLINK_MAX_PACKET_LEN];

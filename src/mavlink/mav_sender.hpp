@@ -34,6 +34,7 @@ public:
 
     void send_gps_raw_int(const RoverState& state);
     void send_global_position_int(const RoverState& state);
+    void send_cellular_status(const RoverState& state);
 
 private:
     void send(mavlink_message_t& msg, const RoverState& state);

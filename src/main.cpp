@@ -26,6 +26,10 @@
 #ifdef GPS_NMEA
 #include "gps/nmea_gps_provider.hpp"
 #endif
+#include "lte/stub_lte_monitor.hpp"
+#ifdef LTE_USB
+#include "lte/usb_lte_monitor.hpp"
+#endif
 
 static std::atomic<bool> running{true};
 
@@ -76,9 +80,15 @@ int main()
 #else
     StubGpsProvider gps{};
 #endif
+#ifdef LTE_USB
+    UsbLteMonitor lte{};
+#else
+    StubLteMonitor lte{};
+#endif
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
     uint64_t last_hb           = 0;
+    uint64_t last_lte_poll     = 0;
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
@@ -257,6 +267,12 @@ int main()
 
         uint64_t now = micros();
 
+        if (now - last_lte_poll > Config::Lte::POLL_INTERVAL_US) {
+            lte.update();
+            state.lte    = lte.status();
+            last_lte_poll = now;
+        }
+
         if (state.armed != prev_armed) {
             if (state.armed) {
                 motors.engage();
@@ -290,12 +306,36 @@ int main()
             mc_timeout_active = false;
         }
 
+        // LTE failsafe: stop motors if connection drops while armed
+        {
+            bool lte_just_dropped = state.lte_was_connected && !state.lte.connected;
+            if (lte_just_dropped && state.armed) {
+                logger::line("[lte] connection lost — stopping motors");
+                state.lte_failsafe_active = true;
+            }
+            if (state.lte.connected)
+                state.lte_failsafe_active = false;
+
+            if (state.lte_failsafe_active && state.armed) {
+                uint32_t elapsed_ms = static_cast<uint32_t>(
+                    std::min<uint64_t>((now - last_slew_tick_us) / 1000, 500));
+                last_slew_tick_us = now;
+                uint32_t slew_ms = static_cast<uint32_t>(params.get(1));
+                DriveOutput smoothed = slew.step({0, 0}, elapsed_ms, slew_ms);
+                int16_t trim = static_cast<int16_t>(params.get(2));
+                motors.set(clamp_axis(static_cast<int32_t>(smoothed.left)  + trim),
+                           clamp_axis(static_cast<int32_t>(smoothed.right) - trim));
+            }
+            state.lte_was_connected = state.lte.connected;
+        }
+
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
             mav.send_current_mode(state);
             mav.send_gps_raw_int(state);
             mav.send_global_position_int(state);
+            mav.send_cellular_status(state);
             last_hb = now;
         }
     }

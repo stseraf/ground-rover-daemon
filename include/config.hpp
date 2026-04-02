@@ -55,6 +55,14 @@ namespace Config {
 
     constexpr const char* PARAM_FILE = "params"; // relative to WorkingDirectory
 
+    // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
+    namespace Lte {
+        constexpr uint64_t    POLL_INTERVAL_US = 5'000'000ULL; // 5 s
+        constexpr const char* API_HOST         = "192.168.100.1";
+        constexpr uint16_t    API_PORT         = 80;
+        constexpr const char* IFACE_FLAGS_PATH = "/sys/class/net/usb0/flags";
+    }
+
     // Stub telemetry values
     constexpr uint16_t DUMMY_LOAD_PERMILLE  = 500;
     constexpr uint16_t DUMMY_BATTERY_MV     = 12000;

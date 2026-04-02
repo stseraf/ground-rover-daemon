@@ -27,6 +27,12 @@ ifeq ($(GPS),nmea)
   CXXFLAGS += -DGPS_NMEA
 endif
 
+# LTE=stub (default, no deps) or LTE=usb (USB modem via sysfs + HTTP API, no external libs)
+LTE     ?= stub
+ifeq ($(LTE),usb)
+  CXXFLAGS += -DLTE_USB
+endif
+
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
        src/mavlink/param_store.cpp \
@@ -45,6 +51,10 @@ ifeq ($(GPS),nmea)
   SRCS += src/gps/nmea_gps_provider.cpp
 endif
 
+ifeq ($(LTE),usb)
+  SRCS += src/lte/usb_lte_monitor.cpp
+endif
+
 HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
@@ -52,7 +62,9 @@ HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/motor/*.hpp) \
           $(wildcard src/gimbal/*.hpp) \
           $(wildcard src/gps/*.hpp) \
-          $(wildcard include/gps_fix.hpp)
+          $(wildcard src/lte/*.hpp) \
+          $(wildcard include/gps_fix.hpp) \
+          $(wildcard include/lte_status.hpp)
 
 TARGET = build/ground_rover_daemon
 
@@ -62,7 +74,7 @@ build:
 	mkdir -p build
 
 $(TARGET): $(SRCS) $(HEADERS)
-	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS)]"
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS) LTE=$(LTE)]"
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
 
 rebuild: clean all
@@ -70,7 +82,7 @@ rebuild: clean all
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea LTE=usb
 	ssh $(RPI) "mkdir -p /home/pi/ground-rover-daemon && sudo systemctl stop ground-rover-daemon || true"
 	scp $(TARGET) $(RPI):/home/pi/ground-rover-daemon/
 	scp deploy/ground-rover-daemon.service $(RPI):/tmp/
