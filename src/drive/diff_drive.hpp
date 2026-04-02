@@ -46,5 +46,6 @@ static inline DriveOutput compute_diff_drive(int16_t z, int16_t y, int16_t dead_
 {
     z = apply_dead_zone(z, dead_zone);
     y = apply_dead_zone(y, dead_zone);
+    if (z < 0) y = -y;
     return { clamp_axis(z + y), clamp_axis(z - y) };
 }
