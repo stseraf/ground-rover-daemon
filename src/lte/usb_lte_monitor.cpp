@@ -3,9 +3,11 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -47,21 +49,46 @@ bool UsbLteMonitor::http_post(const char* body, const char* extra_headers,
     if (sock < 0)
         return false;
 
-    // 2 s connect + I/O timeout — long enough for modem, short enough to not
-    // stall the main loop noticeably.
-    struct timeval tv{2, 0};
-    ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // Non-blocking connect with 3 s timeout via poll().
+    ::fcntl(sock, F_SETFL, ::fcntl(sock, F_GETFL) | O_NONBLOCK);
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(Config::Lte::API_PORT);
     ::inet_pton(AF_INET, Config::Lte::API_HOST, &addr.sin_addr);
 
-    if (::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+    int rc = ::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    if (rc < 0 && errno != EINPROGRESS) {
+        logger::line("[lte] connect to %s:%u failed: %s",
+                     Config::Lte::API_HOST, Config::Lte::API_PORT, ::strerror(errno));
         ::close(sock);
         return false;
     }
+
+    if (rc != 0) {
+        struct pollfd pfd{sock, POLLOUT, 0};
+        int prc = ::poll(&pfd, 1, 3000);  // 3 s timeout
+        if (prc <= 0) {
+            // Modem HTTP server not ready yet — caller will retry next poll.
+            ::close(sock);
+            return false;
+        }
+        int err = 0;
+        socklen_t errlen = sizeof(err);
+        ::getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
+        if (err != 0) {
+            logger::line("[lte] connect to %s:%u failed: %s",
+                         Config::Lte::API_HOST, Config::Lte::API_PORT, ::strerror(err));
+            ::close(sock);
+            return false;
+        }
+    }
+
+    // Back to blocking for send/recv, with 2 s I/O timeout.
+    ::fcntl(sock, F_SETFL, ::fcntl(sock, F_GETFL) & ~O_NONBLOCK);
+    struct timeval tv{2, 0};
+    ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     int body_len = static_cast<int>(::strlen(body));
 
@@ -115,15 +142,11 @@ bool UsbLteMonitor::fetch_signal()
     static const char login_body[]  = "{\"funcNo\":1000,\"username\":\"admin\",\"password\":\"admin\"}";
     static const char signal_body[] = "{\"funcNo\":1001}";
 
-    if (!http_post(login_body, nullptr, resp, sizeof(resp))) {
-        logger::line("[lte] login HTTP failed");
+    if (!http_post(login_body, nullptr, resp, sizeof(resp)))
         return false;
-    }
 
-    if (!http_post(signal_body, nullptr, resp, sizeof(resp))) {
-        logger::line("[lte] signal HTTP failed");
+    if (!http_post(signal_body, nullptr, resp, sizeof(resp)))
         return false;
-    }
 
     // Parse "rssi":<value> from the fixed-schema JSON response.
     // Example: {"results":[{"oper":"KYIVSTAR","netstatus":"Connected","netmode":"LTE","rssi":4}],...}
@@ -196,8 +219,10 @@ void UsbLteMonitor::update()
         logger::line("[lte] modem detected (usb0 up)");
 
     if (!fetch_signal()) {
-        // API unreachable — treat as disconnected but keep present=true.
-        logger::line("[lte] signal query failed — treating as disconnected");
+        if (was_connected)
+            logger::line("[lte] API unreachable — treating as disconnected");
+        else
+            logger::line("[lte] API not ready yet — retrying next poll");
         status_.connected = false;
         status_.rssi      = 0;
         return;
