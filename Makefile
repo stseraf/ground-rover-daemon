@@ -88,7 +88,16 @@ deploy:
 	scp deploy/ground-rover-daemon.service $(RPI):/tmp/
 	ssh $(RPI) "sudo mv /tmp/ground-rover-daemon.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ground-rover-daemon"
 
+# Deploy modem config to a fresh/replacement UZ801 dongle via ADB.
+# Copies scripts to the Pi and runs deploy-modem.sh there (adb is on the Pi).
+# Usage: make deploy-modem [RPI=pi@pi-rover.lan]
+deploy-modem:
+	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
+	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh deploy/modem/deploy-modem.sh \
+	    $(RPI):/tmp/modem-deploy/
+	ssh $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh"
+
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy clean
+.PHONY: all build rebuild deploy deploy-modem clean
