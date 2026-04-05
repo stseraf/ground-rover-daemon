@@ -42,4 +42,9 @@ log "launching led_status.sh"
 /system/etc/led_status.sh > /data/logs/led_status.log 2>&1 &
 log "led_status launched pid=$!"
 
+# --- LTE status TCP server (Pi daemon connects to port 8080 for signal/operator info) ---
+log "launching lte_status_srv.sh"
+/system/etc/lte_status_srv.sh > /data/logs/lte_status_srv.log 2>&1 &
+log "lte_status_srv launched pid=$!"
+
 log "=== nat_forward.sh done ==="

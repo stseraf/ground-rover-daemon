@@ -93,7 +93,8 @@ deploy:
 # Usage: make deploy-modem [RPI=pi@pi-rover.lan]
 deploy-modem:
 	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
-	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh deploy/modem/deploy-modem.sh \
+	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh \
+	    deploy/modem/lte_status_srv.sh deploy/modem/deploy-modem.sh \
 	    $(RPI):/tmp/modem-deploy/
 	ssh $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh"
 

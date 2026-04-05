@@ -53,6 +53,10 @@ step "Pushing led_status.sh"
 adb push "$SCRIPT_DIR/led_status.sh" /system/etc/led_status.sh
 adb shell chmod 755 /system/etc/led_status.sh
 
+step "Pushing lte_status_srv.sh"
+adb push "$SCRIPT_DIR/lte_status_srv.sh" /system/etc/lte_status_srv.sh
+adb shell chmod 755 /system/etc/lte_status_srv.sh
+
 # --- Hook into boot ---
 step "Hooking nat_forward.sh into init.qcom.post_boot.sh"
 HOOK_MARKER="nat_forward.sh"
@@ -92,6 +96,13 @@ MIFI=$(adb shell pm list packages -d 2>/dev/null | grep mifiservice || echo "")
 
 DNSMASQ=$(adb shell ps 2>/dev/null | grep dnsmasq || echo "")
 [ -z "$DNSMASQ" ] && echo "  [OK] dnsmasq not running (static IP mode)" || echo "  [WARN] dnsmasq still running — stale process?"
+
+LTE_SRV_PID=$(adb shell "cat /data/logs/lte_status_srv.pid 2>/dev/null" | tr -d '\r' || echo "")
+if [ -n "$LTE_SRV_PID" ] && adb shell "kill -0 $LTE_SRV_PID 2>/dev/null" >/dev/null 2>&1; then
+    echo "  [OK] lte_status_srv running (pid=$LTE_SRV_PID)"
+else
+    echo "  [WARN] lte_status_srv not running"
+fi
 
 BR0=$(adb shell ip addr show br0 2>/dev/null | grep "192.168.100.1" || echo "")
 [ -n "$BR0" ] && echo "  [OK] br0 has correct IP" || die "br0 missing or wrong IP"

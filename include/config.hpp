@@ -58,9 +58,10 @@ namespace Config {
     // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
     namespace Lte {
         constexpr uint64_t    POLL_INTERVAL_US = 5'000'000ULL; // 5 s
-        constexpr const char* API_HOST         = "192.168.100.1";
-        constexpr uint16_t    API_PORT         = 80;
+        constexpr const char* STATUS_HOST      = "192.168.100.1";
+        constexpr uint16_t    STATUS_PORT      = 8080;         // lte_status_srv.sh TCP port
         constexpr const char* IFACE_FLAGS_PATH = "/sys/class/net/usb0/flags";
+        constexpr const char* PROC_NET_DEV     = "/proc/net/dev";
     }
 
     // Stub telemetry values

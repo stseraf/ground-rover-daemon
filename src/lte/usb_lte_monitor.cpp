@@ -39,11 +39,10 @@ bool UsbLteMonitor::check_interface()
 }
 
 // ---------------------------------------------------------------------------
-// Raw HTTP/1.0 POST over a plain TCP socket
+// Signal quality — connect to lte_status_srv.sh TCP daemon on modem
 // ---------------------------------------------------------------------------
 
-bool UsbLteMonitor::http_post(const char* body, const char* extra_headers,
-                               char* resp_buf, int resp_buf_size)
+bool UsbLteMonitor::fetch_signal()
 {
     int sock = ::socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -54,22 +53,19 @@ bool UsbLteMonitor::http_post(const char* body, const char* extra_headers,
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(Config::Lte::API_PORT);
-    ::inet_pton(AF_INET, Config::Lte::API_HOST, &addr.sin_addr);
+    addr.sin_port   = htons(Config::Lte::STATUS_PORT);
+    ::inet_pton(AF_INET, Config::Lte::STATUS_HOST, &addr.sin_addr);
 
     int rc = ::connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     if (rc < 0 && errno != EINPROGRESS) {
-        logger::line("[lte] connect to %s:%u failed: %s",
-                     Config::Lte::API_HOST, Config::Lte::API_PORT, ::strerror(errno));
         ::close(sock);
         return false;
     }
 
     if (rc != 0) {
         struct pollfd pfd{sock, POLLOUT, 0};
-        int prc = ::poll(&pfd, 1, 3000);  // 3 s timeout
+        int prc = ::poll(&pfd, 1, 3000);
         if (prc <= 0) {
-            // Modem HTTP server not ready yet — caller will retry next poll.
             ::close(sock);
             return false;
         }
@@ -77,120 +73,95 @@ bool UsbLteMonitor::http_post(const char* body, const char* extra_headers,
         socklen_t errlen = sizeof(err);
         ::getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen);
         if (err != 0) {
-            logger::line("[lte] connect to %s:%u failed: %s",
-                         Config::Lte::API_HOST, Config::Lte::API_PORT, ::strerror(err));
             ::close(sock);
             return false;
         }
     }
 
-    // Back to blocking for send/recv, with 2 s I/O timeout.
+    // Blocking read with 2 s timeout.
     ::fcntl(sock, F_SETFL, ::fcntl(sock, F_GETFL) & ~O_NONBLOCK);
     struct timeval tv{2, 0};
     ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    int body_len = static_cast<int>(::strlen(body));
-
-    char req[512];
-    int req_len = ::snprintf(req, sizeof(req),
-        "POST /ajax HTTP/1.0\r\n"
-        "Host: %s\r\n"
-        "Content-Type: application/json\r\n"
-        "Content-Length: %d\r\n"
-        "%s"
-        "\r\n"
-        "%s",
-        Config::Lte::API_HOST, body_len,
-        extra_headers ? extra_headers : "",
-        body);
-
-    if (req_len <= 0 || req_len >= static_cast<int>(sizeof(req))) {
-        ::close(sock);
-        return false;
-    }
-
-    ssize_t sent = ::send(sock, req, static_cast<size_t>(req_len), 0);
-    if (sent != req_len) {
-        ::close(sock);
-        return false;
-    }
-
+    char line[256]{};
     int total = 0;
-    while (total < resp_buf_size - 1) {
-        ssize_t n = ::recv(sock, resp_buf + total, static_cast<size_t>(resp_buf_size - 1 - total), 0);
-        if (n <= 0)
-            break;
+    while (total < static_cast<int>(sizeof(line)) - 1) {
+        ssize_t n = ::recv(sock, line + total, sizeof(line) - 1 - total, 0);
+        if (n <= 0) break;
         total += static_cast<int>(n);
+        if (line[total - 1] == '\n') break;
     }
-    resp_buf[total] = '\0';
     ::close(sock);
-    return total > 0;
+
+    if (total == 0)
+        return false;
+
+    // Parse "key=value" pairs separated by spaces.
+    // Format: connected=1 rssi=15 netmode=LTE oper=KYIVSTAR
+    char* p = line;
+    while (*p && *p != '\n') {
+        // Skip spaces
+        while (*p == ' ') ++p;
+        if (!*p || *p == '\n') break;
+
+        // Find key end
+        char* key = p;
+        while (*p && *p != '=' && *p != ' ' && *p != '\n') ++p;
+        if (*p != '=') break;
+        *p++ = '\0';
+
+        // Find value end
+        char* val = p;
+        while (*p && *p != ' ' && *p != '\n') ++p;
+        char saved = *p;
+        *p = '\0';
+
+        if (::strcmp(key, "connected") == 0) {
+            status_.connected = (val[0] == '1');
+        } else if (::strcmp(key, "rssi") == 0) {
+            status_.rssi = static_cast<uint8_t>(::atoi(val));
+        } else if (::strcmp(key, "netmode") == 0) {
+            ::strncpy(status_.netmode, val, sizeof(status_.netmode) - 1);
+            status_.netmode[sizeof(status_.netmode) - 1] = '\0';
+        } else if (::strcmp(key, "oper") == 0) {
+            ::strncpy(status_.oper, val, sizeof(status_.oper) - 1);
+            status_.oper[sizeof(status_.oper) - 1] = '\0';
+        }
+
+        *p = saved;
+    }
+
+    return true;
 }
 
 // ---------------------------------------------------------------------------
-// Signal quality fetch (login + signal query)
+// Traffic stats — read /proc/net/dev for usb0 RX/TX byte counters
 // ---------------------------------------------------------------------------
 
-bool UsbLteMonitor::fetch_signal()
+bool UsbLteMonitor::fetch_traffic()
 {
-    char resp[1024];
-
-    // The modem tracks session by IP server-side (no cookie returned).
-    // funcNo=1000 must be called first each time to initialise the session,
-    // then funcNo=1001 returns signal data.
-    static const char login_body[]  = "{\"funcNo\":1000,\"username\":\"admin\",\"password\":\"admin\"}";
-    static const char signal_body[] = "{\"funcNo\":1001}";
-
-    if (!http_post(login_body, nullptr, resp, sizeof(resp)))
+    FILE* f = ::fopen(Config::Lte::PROC_NET_DEV, "r");
+    if (!f)
         return false;
 
-    if (!http_post(signal_body, nullptr, resp, sizeof(resp)))
-        return false;
+    char line[256];
+    while (::fgets(line, sizeof(line), f)) {
+        const char* p = line;
+        while (*p == ' ') ++p;
+        if (::strncmp(p, "usb0:", 5) != 0) continue;
+        p += 5;
 
-    // Parse "rssi":<value> from the fixed-schema JSON response.
-    // Example: {"results":[{"oper":"KYIVSTAR","netstatus":"Connected","netmode":"LTE","rssi":4}],...}
-    const char* rssi_key = ::strstr(resp, "\"rssi\":");
-    if (!rssi_key) {
-        logger::line("[lte] signal response missing rssi — resp: %.120s", resp);
-        return false;
+        char* end;
+        status_.rx_bytes = ::strtoull(p, &end, 10);
+        // Skip 7 fields: rx_packets, errs, drop, fifo, frame, compressed, multicast
+        for (int i = 0; i < 7; i++) ::strtoull(end, &end, 10);
+        status_.tx_bytes = ::strtoull(end, nullptr, 10);
+
+        ::fclose(f);
+        return true;
     }
-    rssi_key += ::strlen("\"rssi\":");
-    status_.rssi = static_cast<uint8_t>(::atoi(rssi_key));
-
-    // Parse "netmode":"<value>"
-    const char* nm = ::strstr(resp, "\"netmode\":\"");
-    if (nm) {
-        nm += ::strlen("\"netmode\":\"");
-        int i = 0;
-        while (*nm && *nm != '"' && i < static_cast<int>(sizeof(status_.netmode)) - 1)
-            status_.netmode[i++] = *nm++;
-        status_.netmode[i] = '\0';
-    }
-
-    // Parse "oper":"<value>"
-    const char* op = ::strstr(resp, "\"oper\":\"");
-    if (op) {
-        op += ::strlen("\"oper\":\"");
-        int i = 0;
-        while (*op && *op != '"' && i < static_cast<int>(sizeof(status_.oper)) - 1)
-            status_.oper[i++] = *op++;
-        status_.oper[i] = '\0';
-    }
-
-    // Parse "netstatus":"Connected"
-    const char* ns_key = ::strstr(resp, "\"netstatus\":\"");
-    char netstatus[16]{};
-    if (ns_key) {
-        ns_key += ::strlen("\"netstatus\":\"");
-        int i = 0;
-        while (*ns_key && *ns_key != '"' && i < static_cast<int>(sizeof(netstatus)) - 1)
-            netstatus[i++] = *ns_key++;
-        netstatus[i] = '\0';
-    }
-    status_.connected = ::strcmp(netstatus, "Connected") == 0;
-
-    return true;
+    ::fclose(f);
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,17 +183,21 @@ void UsbLteMonitor::update()
         status_.rssi       = 0;
         status_.netmode[0] = '\0';
         status_.oper[0]    = '\0';
+        status_.rx_bytes   = 0;
+        status_.tx_bytes   = 0;
         return;
     }
 
     if (!was_present)
         logger::line("[lte] modem detected (usb0 up)");
 
+    fetch_traffic();
+
     if (!fetch_signal()) {
         if (was_connected)
-            logger::line("[lte] API unreachable — treating as disconnected");
+            logger::line("[lte] status daemon unreachable — treating as disconnected");
         else
-            logger::line("[lte] API not ready yet — retrying next poll");
+            logger::line("[lte] status daemon not ready yet — retrying next poll");
         status_.connected = false;
         status_.rssi      = 0;
         return;
