@@ -193,6 +193,10 @@ void UsbLteMonitor::update()
 
     fetch_traffic();
 
+    if (!was_present && status_.rx_bytes + status_.tx_bytes > 0)
+        logger::line("[lte] traffic since Pi boot — rx=%.1f MB tx=%.1f MB",
+                     status_.rx_bytes / 1e6, status_.tx_bytes / 1e6);
+
     if (!fetch_signal()) {
         if (was_connected)
             logger::line("[lte] status daemon unreachable — treating as disconnected");
