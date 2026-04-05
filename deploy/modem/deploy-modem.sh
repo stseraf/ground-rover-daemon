@@ -91,7 +91,7 @@ MIFI=$(adb shell pm list packages -d 2>/dev/null | grep mifiservice || echo "")
 [ -n "$MIFI" ] && echo "  [OK] MifiService disabled" || echo "  [WARN] Could not confirm MifiService state"
 
 DNSMASQ=$(adb shell ps 2>/dev/null | grep dnsmasq || echo "")
-[ -n "$DNSMASQ" ] && echo "  [OK] dnsmasq running" || die "dnsmasq not running"
+[ -z "$DNSMASQ" ] && echo "  [OK] dnsmasq not running (static IP mode)" || echo "  [WARN] dnsmasq still running — stale process?"
 
 BR0=$(adb shell ip addr show br0 2>/dev/null | grep "192.168.100.1" || echo "")
 [ -n "$BR0" ] && echo "  [OK] br0 has correct IP" || die "br0 missing or wrong IP"

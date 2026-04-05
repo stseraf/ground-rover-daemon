@@ -97,7 +97,22 @@ deploy-modem:
 	    $(RPI):/tmp/modem-deploy/
 	ssh $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh"
 
+# Configure static IP on Pi's RNDIS USB interface (usb0) for LTE modem tethering.
+# Replaces dnsmasq DHCP — Pi uses 192.168.100.100/24 with GW 192.168.100.1.
+# Persistent across reboots via NetworkManager or dhcpcd.
+# Usage: make setup-pi-usb [RPI=pi@pi-rover.lan]
+setup-pi-usb:
+	scp deploy/pi/setup-usb-static.sh $(RPI):/tmp/setup-usb-static.sh
+	ssh $(RPI) "bash /tmp/setup-usb-static.sh"
+
+# Measure CPU usage on the UZ801 modem via ADB (runs through the Pi).
+# Usage: make modem-cpu [RPI=pi@pi-rover.lan] [INTERVAL=5]
+INTERVAL ?= 5
+modem-cpu:
+	scp deploy/modem/measure-cpu.sh deploy/modem/measure-cpu-inner.sh $(RPI):/tmp/
+	ssh $(RPI) "bash /tmp/measure-cpu.sh $(INTERVAL)"
+
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy deploy-modem clean
+.PHONY: all build rebuild deploy deploy-modem setup-pi-usb modem-cpu clean

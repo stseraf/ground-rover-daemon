@@ -10,11 +10,6 @@ log "=== nat_forward.sh start ==="
 BRIDGE=br0
 IFACE=rndis0
 GW=192.168.100.1
-DHCP_RANGE_START=192.168.100.100
-DHCP_RANGE_END=192.168.100.200
-LEASE_TIME=12h
-LEASE_FILE=/data/logs/dnsmasq.leases
-PID_FILE=/data/logs/dnsmasq.pid
 
 # --- Bridge setup ---
 log "bridge setup"
@@ -25,35 +20,7 @@ ip addr add $GW/24 dev $BRIDGE
 ip link set $IFACE up
 ip link set $BRIDGE up
 log "bridge done"
-
-# --- DHCP server ---
-log "dnsmasq setup"
-# Kill any stale instance
-if [ -f $PID_FILE ]; then
-    kill $(cat $PID_FILE) 2>/dev/null
-    rm -f $PID_FILE
-fi
-# Use LTE operator DNS as upstream (from net.dns1/net.dns2 at runtime)
-DNS1=$(getprop net.dns1)
-DNS2=$(getprop net.dns2)
-[ -z "$DNS1" ] && DNS1=8.8.8.8
-[ -z "$DNS2" ] && DNS2=8.8.4.4
-log "DNS1=$DNS1 DNS2=$DNS2"
-
-/system/bin/dnsmasq \
-    --listen-address=$GW \
-    --bind-interfaces \
-    --dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,$LEASE_TIME \
-    --dhcp-option=3,$GW \
-    --dhcp-option=6,$GW \
-    --server=$DNS1 \
-    --server=$DNS2 \
-    --no-hosts \
-    --no-resolv \
-    --no-poll \
-    --dhcp-leasefile=$LEASE_FILE \
-    --pid-file=$PID_FILE
-log "dnsmasq done rc=$?"
+# Static IP mode: Pi uses 192.168.100.100/24, GW 192.168.100.1 — no DHCP needed.
 
 # --- IP forwarding ---
 log "ip forwarding"
