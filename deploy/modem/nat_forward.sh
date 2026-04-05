@@ -13,8 +13,8 @@ GW=192.168.100.1
 DHCP_RANGE_START=192.168.100.100
 DHCP_RANGE_END=192.168.100.200
 LEASE_TIME=12h
-LEASE_FILE=/data/misc/dhcp/dnsmasq.leases
-PID_FILE=/data/misc/dhcp/dnsmasq.pid
+LEASE_FILE=/data/logs/dnsmasq.leases
+PID_FILE=/data/logs/dnsmasq.pid
 
 # --- Bridge setup ---
 log "bridge setup"
@@ -41,13 +41,16 @@ DNS2=$(getprop net.dns2)
 log "DNS1=$DNS1 DNS2=$DNS2"
 
 /system/bin/dnsmasq \
-    --interface=$BRIDGE \
+    --listen-address=$GW \
+    --bind-interfaces \
     --dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,$LEASE_TIME \
     --dhcp-option=3,$GW \
     --dhcp-option=6,$GW \
     --server=$DNS1 \
     --server=$DNS2 \
     --no-hosts \
+    --no-resolv \
+    --no-poll \
     --dhcp-leasefile=$LEASE_FILE \
     --pid-file=$PID_FILE
 log "dnsmasq done rc=$?"
