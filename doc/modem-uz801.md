@@ -434,6 +434,58 @@ adb shell "echo 0   > /sys/class/leds/red/brightness"
 
 ---
 
+## CPU Measurement
+
+To measure CPU usage on the modem (useful for profiling services like dnsmasq):
+
+```bash
+# From Pi (adb must be available):
+bash /tmp/modem-deploy/measure-cpu.sh [interval_seconds]
+
+# Example — 5s window (default):
+bash /tmp/modem-deploy/measure-cpu.sh
+
+# Example — 10s window:
+bash /tmp/modem-deploy/measure-cpu.sh 10
+```
+
+Or deploy first if not already on the Pi:
+
+```bash
+# From dev machine:
+scp deploy/modem/measure-cpu.sh deploy/modem/measure-cpu-inner.sh pi@pi-rover.lan:/tmp/modem-deploy/
+ssh pi@pi-rover.lan "bash /tmp/modem-deploy/measure-cpu.sh 5"
+```
+
+**Sample output:**
+
+```
+=== Modem CPU Measurement (5s window) ===
+
+--- Total CPU ---
+  User:    20%
+  System:  33%
+  IOWait:   1%
+  Active:  55%
+  Idle:    44%
+
+--- Per-core ---
+  cpu0:   8% active  (user=23 sys=19 idle=456 jiffies)
+  cpu1: 100% active  (user=194 sys=329 idle=0 jiffies)
+
+--- Processes with >0% CPU ---
+  TOTAL%  PID      USER%  SYS%   NAME
+  ----------------------------------------
+  50%      1295      18%    31%    dnsmasq
+   1%      1553       1%     0%    fiservice.hello
+```
+
+**Note:** dnsmasq consistently uses ~50% of one core on this device (Snapdragon 410, kernel 3.10).
+This is a known behavior of the embedded dnsmasq build on Android 4.4 — the original MifiService
+dnsmasq behaves the same way (~37% when WiFi hotspot is active). It does not affect rover operation.
+
+---
+
 ## Notes
 
 - Firmware locale is `zh-CN` (Chinese OEM), but the modem works globally.
