@@ -27,6 +27,12 @@ ifeq ($(GPS),nmea)
   CXXFLAGS += -DGPS_NMEA
 endif
 
+# LTE=stub (default, no deps) or LTE=usb (USB modem via sysfs + HTTP API, no external libs)
+LTE     ?= stub
+ifeq ($(LTE),usb)
+  CXXFLAGS += -DLTE_USB
+endif
+
 SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
        src/mavlink/param_store.cpp \
@@ -45,6 +51,10 @@ ifeq ($(GPS),nmea)
   SRCS += src/gps/nmea_gps_provider.cpp
 endif
 
+ifeq ($(LTE),usb)
+  SRCS += src/lte/usb_lte_monitor.cpp
+endif
+
 HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
@@ -52,7 +62,9 @@ HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/motor/*.hpp) \
           $(wildcard src/gimbal/*.hpp) \
           $(wildcard src/gps/*.hpp) \
-          $(wildcard include/gps_fix.hpp)
+          $(wildcard src/lte/*.hpp) \
+          $(wildcard include/gps_fix.hpp) \
+          $(wildcard include/lte_status.hpp)
 
 TARGET = build/ground_rover_daemon
 
@@ -62,7 +74,7 @@ build:
 	mkdir -p build
 
 $(TARGET): $(SRCS) $(HEADERS)
-	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS)]"
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS) LTE=$(LTE)]"
 	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
 
 rebuild: clean all
@@ -70,13 +82,38 @@ rebuild: clean all
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea
+	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea LTE=usb
 	ssh $(RPI) "mkdir -p /home/pi/ground-rover-daemon && sudo systemctl stop ground-rover-daemon || true"
 	scp $(TARGET) $(RPI):/home/pi/ground-rover-daemon/
 	scp deploy/ground-rover-daemon.service $(RPI):/tmp/
 	ssh $(RPI) "sudo mv /tmp/ground-rover-daemon.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now ground-rover-daemon"
 
+# Deploy modem config to a fresh/replacement UZ801 dongle via ADB.
+# Copies scripts to the Pi and runs deploy-modem.sh there (adb is on the Pi).
+# Usage: make deploy-modem [RPI=pi@pi-rover.lan]
+deploy-modem:
+	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
+	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh \
+	    deploy/modem/lte_status_srv.sh deploy/modem/deploy-modem.sh \
+	    $(RPI):/tmp/modem-deploy/
+	ssh $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh"
+
+# Configure static IP on Pi's RNDIS USB interface (usb0) for LTE modem tethering.
+# Replaces dnsmasq DHCP — Pi uses 192.168.100.100/24 with GW 192.168.100.1.
+# Persistent across reboots via NetworkManager or dhcpcd.
+# Usage: make setup-pi-usb [RPI=pi@pi-rover.lan]
+setup-pi-usb:
+	scp deploy/pi/setup-usb-static.sh $(RPI):/tmp/setup-usb-static.sh
+	ssh $(RPI) "bash /tmp/setup-usb-static.sh"
+
+# Measure CPU usage on the UZ801 modem via ADB (runs through the Pi).
+# Usage: make modem-cpu [RPI=pi@pi-rover.lan] [INTERVAL=5]
+INTERVAL ?= 5
+modem-cpu:
+	scp deploy/modem/measure-cpu.sh deploy/modem/measure-cpu-inner.sh $(RPI):/tmp/
+	ssh $(RPI) "bash /tmp/measure-cpu.sh $(INTERVAL)"
+
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy clean
+.PHONY: all build rebuild deploy deploy-modem setup-pi-usb modem-cpu clean

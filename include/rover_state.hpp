@@ -9,6 +9,7 @@
 #pragma GCC diagnostic pop
 
 #include "gps_fix.hpp"
+#include "lte_status.hpp"
 
 struct RoverState {
     bool        armed           = false;
@@ -21,4 +22,8 @@ struct RoverState {
     GpsFix  current_fix{};
     int32_t home_alt_mm = 0;    // altitude at first valid fix, mm MSL
     bool    home_set    = false;
+
+    LteStatus lte{};
+    bool      lte_failsafe_active = false;
+    bool      lte_was_connected   = false;  // edge detection for drop event
 };
