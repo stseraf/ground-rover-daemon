@@ -106,6 +106,20 @@ setup-pi-usb:
 	scp deploy/pi/setup-usb-static.sh $(RPI):/tmp/setup-usb-static.sh
 	ssh $(RPI) "bash /tmp/setup-usb-static.sh"
 
+# Configure WiFi client uplink on the modem.
+# Writes wpa_supplicant config so nat_forward.sh uses home WiFi instead of LTE.
+# Usage: make setup-modem-wifi WIFI_SSID=S_HOME WIFI_PSK=password [RPI=pi@pi-rover.lan]
+WIFI_SSID ?=
+WIFI_PSK  ?=
+setup-modem-wifi:
+	scp deploy/modem/setup-wifi-client.sh $(RPI):/tmp/setup-wifi-client.sh
+	ssh $(RPI) "WIFI_SSID='$(WIFI_SSID)' WIFI_PSK='$(WIFI_PSK)' bash /tmp/setup-wifi-client.sh"
+
+# Remove WiFi client config from modem (reverts to LTE-only uplink).
+# Usage: make remove-modem-wifi [RPI=pi@pi-rover.lan]
+remove-modem-wifi:
+	ssh $(RPI) "adb shell rm -f /data/misc/wifi/rover_wpa.conf && echo removed"
+
 # Measure CPU usage on the UZ801 modem via ADB (runs through the Pi).
 # Usage: make modem-cpu [RPI=pi@pi-rover.lan] [INTERVAL=5]
 INTERVAL ?= 5
@@ -116,4 +130,4 @@ modem-cpu:
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy deploy-modem setup-pi-usb modem-cpu clean
+.PHONY: all build rebuild deploy deploy-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu clean

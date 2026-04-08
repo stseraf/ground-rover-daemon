@@ -91,19 +91,26 @@ adb shell   # now runs as root
 ## Network Architecture
 
 ```
-SIM / LTE
-  └── rmnet0  (modem data interface, 10.x.x.x, assigned by carrier)
-        └── br0  (Linux bridge, 192.168.100.1/24)
-              ├── rndis0  ←USB RNDIS→  usb0 on Pi  (192.168.100.x DHCP)
-              └── wlan0   ←WiFi AP→    WiFi clients (192.168.100.x DHCP)
+Home WiFi or LTE (uplink selected at boot)
+     │
+   wlan0 (WiFi client) or rmnet0 (LTE)
+     │
+   NAT / masquerade (iptables)
+     │
+   br0  (192.168.100.1/24)
+     └── rndis0  ←USB RNDIS→  usb0 on Pi  (192.168.100.100, static)
 ```
 
-The modem acts as a NAT gateway: traffic from `br0` is masqueraded out through `rmnet0`. Both the Pi (via USB RNDIS) and any WiFi clients share the same `192.168.100.0/24` subnet.
+The modem acts as a NAT gateway: traffic from `br0` is masqueraded out through `wlan0` (preferred,
+when `/data/misc/wifi/rover_wpa.conf` exists and association succeeds) or `rmnet0` (LTE fallback).
 
-The Pi receives its lease on `usb0` with:
-- IP: `192.168.100.x/24`
+The Pi uses a **static IP** on `usb0`:
+- IP: `192.168.100.100/24`
 - Gateway: `192.168.100.1`
-- DNS: forwarded by modem's `dnsmasq` to carrier DNS
+- DNS: `192.168.100.1` (modem forwards to carrier or home router DNS)
+
+The factory WiFi hotspot (`wlan0` in AP mode, `hostapd`) is disabled — `wlan0` is used as a
+WiFi client instead when a credential file is present.
 
 ---
 
@@ -164,92 +171,24 @@ Remount `/system` as writable:
 adb remount
 ```
 
-Write `/system/etc/nat_forward.sh` with the following content:
-
-```sh
-#!/system/bin/sh
-# RNDIS tethering setup (MifiService WiFi hotspot disabled via pm disable)
-# Called from /system/etc/init.qcom.post_boot.sh on boot_completed
-
-LOG=/data/logs/nat_forward.log
-log() { echo "$(date) $1" >> $LOG; }
-
-log "=== nat_forward.sh start ==="
-
-BRIDGE=br0
-IFACE=rndis0
-GW=192.168.100.1
-DHCP_RANGE_START=192.168.100.100
-DHCP_RANGE_END=192.168.100.200
-LEASE_TIME=12h
-LEASE_FILE=/data/misc/dhcp/dnsmasq.leases
-PID_FILE=/data/misc/dhcp/dnsmasq.pid
-
-# --- Bridge setup ---
-log "bridge setup"
-brctl addbr $BRIDGE 2>/dev/null
-brctl addif $BRIDGE $IFACE 2>/dev/null
-ip addr flush dev $BRIDGE 2>/dev/null
-ip addr add $GW/24 dev $BRIDGE
-ip link set $IFACE up
-ip link set $BRIDGE up
-log "bridge done"
-
-# --- DHCP server ---
-log "dnsmasq setup"
-# Kill any stale instance
-if [ -f $PID_FILE ]; then
-    kill $(cat $PID_FILE) 2>/dev/null
-    rm -f $PID_FILE
-fi
-# Use LTE operator DNS as upstream (from net.dns1/net.dns2 at runtime)
-DNS1=$(getprop net.dns1)
-DNS2=$(getprop net.dns2)
-[ -z "$DNS1" ] && DNS1=8.8.8.8
-[ -z "$DNS2" ] && DNS2=8.8.4.4
-log "DNS1=$DNS1 DNS2=$DNS2"
-
-/system/bin/dnsmasq \
-    --interface=$BRIDGE \
-    --dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,$LEASE_TIME \
-    --dhcp-option=3,$GW \
-    --dhcp-option=6,$GW \
-    --server=$DNS1 \
-    --server=$DNS2 \
-    --no-hosts \
-    --dhcp-leasefile=$LEASE_FILE \
-    --pid-file=$PID_FILE
-log "dnsmasq done rc=$?"
-
-# --- IP forwarding ---
-log "ip forwarding"
-echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 1 > /proc/sys/net/ipv4/conf/br0/forwarding
-echo 1 > /proc/sys/net/ipv4/conf/rmnet0/forwarding
-
-# --- NAT forwarding ---
-log "iptables"
-iptables -t nat -D natctrl_nat_POSTROUTING -o rmnet0 -j MASQUERADE 2>/dev/null
-iptables -t nat -A natctrl_nat_POSTROUTING -o rmnet0 -j MASQUERADE
-iptables -F natctrl_FORWARD
-iptables -A natctrl_FORWARD -i $BRIDGE -o rmnet0 -j ACCEPT
-iptables -A natctrl_FORWARD -i rmnet0 -o $BRIDGE -m state --state ESTABLISHED,RELATED -j ACCEPT
-log "iptables done"
-
-# --- LED status daemon ---
-log "launching led_status.sh"
-/system/etc/led_status.sh > /data/logs/led_status.log 2>&1 &
-log "led_status launched pid=$!"
-
-log "=== nat_forward.sh done ==="
-```
+The script is maintained at [`deploy/modem/nat_forward.sh`](../deploy/modem/nat_forward.sh).
+It handles bridge setup, IP forwarding, NAT rules, WiFi client uplink (with LTE fallback),
+the LED status daemon, and the LTE status TCP server. See the
+[WiFi Client Mode](#wifi-client-mode-home-wifi-uplink) section for full details.
 
 > **Important:** `adb push` strips the execute bit — always run `chmod 755` after pushing scripts to `/system`.
 
-Push and make executable:
+Deploy via Makefile (recommended):
 
 ```bash
-adb push nat_forward.sh /system/etc/nat_forward.sh
+make deploy-modem [RPI=pi@pi-rover.lan]
+```
+
+Or manually from the Pi:
+
+```bash
+adb remount
+adb push /tmp/nat_forward.sh /system/etc/nat_forward.sh
 adb shell chmod 755 /system/etc/nat_forward.sh
 ```
 
@@ -340,31 +279,27 @@ Reboot the modem (disconnect/reconnect USB or `adb reboot`) and confirm:
 adb shell getprop sys.boot_completed
 # expected: 1
 
-# 2. MifiService and hostapd are NOT running
-adb shell ps | grep -E '(mifiservice|hostapd)'
+# 2. MifiService, hostapd, and dnsmasq are NOT running
+adb shell ps | grep -E '(mifiservice|hostapd|dnsmasq)'
 # expected: no output
 
-# 3. dnsmasq IS running
-adb shell ps | grep dnsmasq
-# expected: /system/bin/dnsmasq
-
-# 4. Bridge is up with correct IP
+# 3. Bridge is up with correct IP
 adb shell ip addr show br0
 # expected: inet 192.168.100.1/24 ... state UP
 
-# 5. IP forwarding is enabled
+# 4. IP forwarding is enabled
 adb shell cat /proc/sys/net/ipv4/ip_forward
 # expected: 1
 
-# 6. NAT rules are in place
+# 5. NAT rules are in place
 adb shell iptables -t nat -L natctrl_nat_POSTROUTING -n
-# expected: MASQUERADE rule present
+# expected: MASQUERADE rule present (wlan0 if WiFi uplink, rmnet0 if LTE)
 
-# 7. Internet works from Pi
+# 6. Internet works from Pi
 ping -I usb0 -c 4 google.com
-# expected: 0% packet loss, ~35-50ms
+# expected: 0% packet loss, ~130ms (WiFi uplink) or ~35-50ms (LTE)
 
-# 8. LED shows green (LTE up)
+# 7. LED shows green (LTE up or WiFi up)
 adb shell cat /sys/class/leds/green/brightness
 # expected: 255
 adb shell cat /sys/class/leds/red/brightness
@@ -375,10 +310,12 @@ adb shell cat /sys/class/leds/red/brightness
 
 | File | Change |
 |------|--------|
-| `/system/etc/nat_forward.sh` | **Created** — bridge + DHCP + NAT setup script, also launches LED daemon |
+| `/system/etc/nat_forward.sh` | **Created** — bridge + NAT setup, WiFi client uplink with LTE fallback, launches LED and LTE status daemons |
 | `/system/etc/led_status.sh` | **Created** — background LED connectivity monitor |
+| `/system/etc/lte_status_srv.sh` | **Created** — TCP server on port 8080 serving LTE signal/operator info to Pi daemon |
 | `/system/etc/init.qcom.post_boot.sh` | **Appended** — calls `nat_forward.sh` at boot |
 | `/data/logs/` | **Created** — log directory (`mkdir -p /data/logs && chmod 777 /data/logs`) |
+| `/data/misc/wifi/rover_wpa.conf` | **Optional** — WiFi credentials; presence enables WiFi client uplink |
 | Package state (in `/data/system/packages.xml`) | `com.mifiservice.hello` marked `disabled` |
 
 All changes survive reboots. `/system` changes survive firmware updates only if the update doesn't wipe the system partition.
@@ -386,6 +323,8 @@ All changes survive reboots. `/system` changes survive firmware updates only if 
 Logs at runtime:
 - `/data/logs/nat_forward.log` — boot execution trace (one entry per reboot)
 - `/data/logs/led_status.log` — LED daemon startup and first 3 poll cycles
+- `/data/logs/wpa_supplicant.log` — wpa_supplicant output (WiFi client mode only)
+- `/data/logs/lte_status_srv.log` — LTE status TCP server output
 
 ---
 
@@ -427,10 +366,12 @@ adb shell "echo 0   > /sys/class/leds/red/brightness"
 | `imsqmidaemon`       | running | IMS QMI                                        |
 | `adbd`               | running | ADB daemon                                     |
 | `thermal-engine`     | running | Thermal management                             |
-| `dnsmasq`            | running | DHCP + DNS for br0 (started by nat_forward.sh) |
+| `led_status.sh`      | running | LED connectivity indicator (launched by nat_forward.sh) |
+| `lte_status_srv.sh`  | running | TCP server on port 8080 — LTE signal/operator info for Pi daemon |
+| `wpa_supplicant`     | running (WiFi) / stopped (LTE) | WiFi client — runs when `rover_wpa.conf` present and association succeeds |
 | `com.mifiservice.hello` | disabled | WiFi hotspot manager — permanently disabled |
 | `hostapd`            | stopped | WiFi AP — not started                          |
-| `wpa_supplicant`     | stopped | Client Wi-Fi — not used                        |
+| `dnsmasq`            | stopped | Replaced by static IP on Pi side               |
 
 ---
 
@@ -483,6 +424,194 @@ ssh pi@pi-rover.lan "bash /tmp/modem-deploy/measure-cpu.sh 5"
 **Note:** dnsmasq consistently uses ~50% of one core on this device (Snapdragon 410, kernel 3.10).
 This is a known behavior of the embedded dnsmasq build on Android 4.4 — the original MifiService
 dnsmasq behaves the same way (~37% when WiFi hotspot is active). It does not affect rover operation.
+
+---
+
+## WiFi Client Mode (Home WiFi uplink)
+
+The modem operates as a **WiFi client** (preferred uplink) with automatic LTE fallback.
+Fully implemented in `nat_forward.sh` and deployed. Live-tested and confirmed working.
+
+```
+Home WiFi (192.168.50.0/24)
+     │
+   wlan0  ← UZ801 as WiFi client (wpa_supplicant + dhcpcd)
+     │
+   NAT / masquerade (iptables)
+     │
+   br0 (192.168.100.1/24)
+     └── rndis0 ←USB→ usb0 on Pi (192.168.100.100)
+```
+
+If WiFi association or DHCP fails at boot, the script falls back to LTE (`rmnet0`) automatically.
+
+### Why L2 bridging doesn't work
+
+`brctl addif br0 wlan0` fails with _"Operation not supported on transport endpoint"_ — 802.11
+client frames use 3-address format; transparent L2 bridging requires 4-address WDS frames which
+home APs don't support. **NAT routing is the correct approach**, identical in pattern to the
+existing LTE setup (`wlan0` replaces `rmnet0` as the egress interface).
+
+### Components available on the modem
+
+| Component | Location | Notes |
+|-----------|----------|-------|
+| WiFi kernel module | `/system/lib/modules/pronto/pronto_wlan.ko` | symlinked as `wlan.ko`; not auto-loaded after MifiService disabled |
+| `wpa_supplicant` | `/system/bin/wpa_supplicant` | v2.1-devel, nl80211 + WPA2-PSK |
+| `dhcpcd` | `/system/bin/dhcpcd` | v5.5.6; obtains DHCP lease from home router |
+
+### Provisioning WiFi credentials
+
+WiFi credentials are stored at `/data/misc/wifi/rover_wpa.conf` on the modem (persists across
+reboots; survives firmware updates since `/data` is not wiped).
+
+From the dev machine:
+
+```bash
+make setup-modem-wifi WIFI_SSID=S_HOME WIFI_PSK=password [RPI=pi@pi-rover.lan]
+```
+
+This runs `deploy/modem/setup-wifi-client.sh` on the Pi, which writes the config via `adb push`.
+
+To revert to LTE-only:
+
+```bash
+make remove-modem-wifi [RPI=pi@pi-rover.lan]
+# adb shell rm -f /data/misc/wifi/rover_wpa.conf && adb reboot
+```
+
+Config file format (no `update_config` — see pitfalls below):
+
+```
+ctrl_interface=/data/misc/wifi/sockets
+ap_scan=1
+fast_reauth=1
+
+network={
+    ssid="S_HOME"
+    psk="password"
+    key_mgmt=WPA-PSK
+}
+```
+
+### Boot sequence (nat_forward.sh)
+
+When `/data/misc/wifi/rover_wpa.conf` exists, `nat_forward.sh` runs this sequence:
+
+1. **Load module** — `insmod /system/lib/modules/wlan.ko` if `wlan` not in `/proc/modules`; wait up to 15s for `wlan0` to appear, then sleep 5s for WCNSS firmware to finish initializing
+2. **Kill stale wpa_supplicant** — using its tracked PID; remove stale socket files from `/data/misc/wifi/sockets/` (they persist across reboots and block new starts)
+3. **Start wpa_supplicant** — `wpa_supplicant -i wlan0 -D nl80211 -c /data/misc/wifi/rover_wpa.conf -O /data/misc/wifi/sockets`
+4. **Fast-fail check** — if no socket file after 3s, wpa_supplicant crashed; fall back to LTE immediately
+5. **Wait for association** — poll `wpa_cli status | grep wpa_state=COMPLETED` up to 90s (cold WCNSS boot can take 60+ seconds)
+6. **DHCP** — run `dhcpcd wlan0`; check for `default.*wlan0` route to confirm success
+7. **NAT rules** — masquerade on `wlan0`, forward `br0 ↔ wlan0`; delete LTE default route so WiFi's is the only default
+8. **Port forwarding** — DNAT specific ports on `wlan0` to the Pi; `POSTROUTING MASQUERADE` on `br0` to fix asymmetric routing (see below)
+9. **LTE fallback** — if any step above fails, fall through to the standard `rmnet0` NAT rules
+
+### Port forwarding to Pi (home network access)
+
+When WiFi uplink is active, the modem port-forwards three ports from its `wlan0` IP
+(`192.168.50.173`) directly to the Pi (`192.168.100.100`):
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| 22 | TCP | SSH |
+| 14550 | UDP | MAVLink |
+| 5600 | UDP | Video (RTP H.264) |
+
+From any host on the home network:
+```bash
+ssh pi@192.168.50.173          # reaches Pi SSH
+# MAVLink GCS: connect to 192.168.50.173:14550
+# Video: udpsrc port=5600 on 192.168.50.173
+```
+
+**Asymmetric routing fix**: The Pi has both `wlan0` (home WiFi, metric 600) and `usb0`
+(modem, metric 700). Without extra rules, DNAT'd packets arriving from `192.168.50.x` would
+be replied to via `wlan0` directly — the client sees a SYN-ACK from the wrong IP and drops it.
+Fix: `iptables -t nat -A POSTROUTING -o br0 -j MASQUERADE` on the modem makes the Pi see all
+port-forwarded connections as coming from `192.168.100.1`, so it always replies via `usb0`.
+
+> **Note:** The Pi's `wlan0` is now disabled (`sudo nmcli radio wifi off`) — only `usb0` is
+> active. This eliminates the BCM43438 firmware disconnect-every-60s issue and the asymmetric
+> routing concern entirely. The port-forward and MASQUERADE rules remain in place for when
+> `wlan0` is re-enabled in future.
+
+### Live test results
+
+```
+# Successful boot log (2026-04-08):
+Wed Apr  8 11:44:31 EEST 2026 wifi: wpa_supplicant started pid=1352
+Wed Apr  8 11:44:34 EEST 2026 wifi: associated after 0s
+Wed Apr  8 11:44:43 EEST 2026 wifi: IP obtained, route: default via 192.168.50.1 dev wlan0 metric 324 — using WiFi as uplink
+
+# Connectivity from Pi:
+ping -I usb0 -c 3 8.8.8.8    # 133ms avg, 0% loss (via home WiFi → ISP)
+
+# Routing on modem when WiFi uplink active:
+default via 192.168.50.1 dev wlan0  metric 324
+192.168.50.0/24 dev wlan0  src 192.168.50.173
+192.168.100.0/24 dev br0   src 192.168.100.1
+# (rmnet0 routes remain for specific IPs but no default via rmnet0)
+```
+
+### Pitfalls discovered during implementation
+
+These traps are non-obvious and cost significant debugging time:
+
+**1. Config filename `wpa_supplicant.conf` is special-cased**
+Android's wpa_supplicant binary has hardcoded logic for the filename `wpa_supplicant.conf`
+(triggers Android WiFi service socket path handling) and exits 255 when started with that path
+outside the Android WiFi framework. **Use any other filename** — we use `rover_wpa.conf`.
+
+**2. `update_config=1` corrupts the config file**
+When `update_config=1` is set, wpa_supplicant rewrites the config file after reading it,
+appending a NUL byte. On the next boot the parser fails silently and falls back to LTE.
+**Omit `update_config` entirely** from the config.
+
+**3. `ip link set wlan0 up` before wpa_supplicant breaks initialization**
+Manually bringing `wlan0` UP puts the WCNSS chip into `<NO-CARRIER,BROADCAST,MULTICAST,UP>`
+state. wpa_supplicant then cannot initialize the interface and exits immediately.
+**Do not set wlan0 up** — wpa_supplicant manages interface state itself.
+
+**4. Config must be `chmod 644`, not `600`**
+Android's wpa_supplicant binary uses Linux capabilities to switch to the `wifi` user (uid=wifi)
+regardless of being started as root. A `chmod 600 root:root` config is unreadable by the wifi
+user → `"Failed to open config file: Permission denied"` in logcat.
+**Always `chmod 644`** when writing the config via `adb push`.
+
+**5. Stale socket files block new starts**
+`/data/misc/wifi/sockets/wlan0` (and `p2p0`) are left from the previous run. Since `/data`
+persists across reboots, these stale sockets prevent wpa_supplicant from binding its control
+socket on the next boot. **`rm -f` the socket files** before starting wpa_supplicant.
+
+**6. WCNSS firmware initialization timing is variable**
+After a cold power cycle, the WCNSS WiFi chip can take anywhere from 0s to 60+ seconds to
+finish firmware initialization before wpa_supplicant can use it. On a warm reboot (module
+already loaded) it is typically instant. The 90s association timeout accommodates the worst case.
+
+**7. Android 4.4 shell is missing most Unix tools**
+`tr`, `cut`, `awk`, `sed`, `killall`, `printf`, `tail` — none available. Use only `grep` and
+POSIX shell builtins. For example, parse `ip route` output with `set -- $line; field=$3` instead
+of `awk '{print $3}'`; check wpa_cli state with `grep -q "wpa_state=COMPLETED"` instead of
+piping through `cut`.
+
+---
+
+## Pi Networking (current state)
+
+The Pi's `wlan0` (BCM43438) is **disabled** via `sudo nmcli radio wifi off` (persistent across
+reboots). Reason: the BCM43438 firmware has a bug causing a locally-generated deauthentication
+every ~60s (reason=3), creating constant reconnect noise and asymmetric routing complexity.
+
+The Pi is reachable exclusively via `usb0 → modem`:
+- Direct (same subnet): `ssh pi@192.168.100.100`
+- From home network via modem port-forward: `ssh pi@192.168.50.173`
+
+To re-enable WiFi on the Pi if needed:
+```bash
+sudo nmcli radio wifi on
+```
 
 ---
 
