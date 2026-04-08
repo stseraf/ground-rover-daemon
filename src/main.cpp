@@ -60,7 +60,11 @@ int main()
 
     {
         struct timespec ts;
+#ifdef __APPLE__
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
         clock_gettime(CLOCK_BOOTTIME, &ts);
+#endif
         logger::line("MAVLink rover daemon started at %lds%03ldms since boot",
                      ts.tv_sec, ts.tv_nsec / 1000000);
     }
