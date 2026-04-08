@@ -126,6 +126,9 @@ bool UsbLteMonitor::fetch_signal()
         } else if (::strcmp(key, "oper") == 0) {
             ::strncpy(status_.oper, val, sizeof(status_.oper) - 1);
             status_.oper[sizeof(status_.oper) - 1] = '\0';
+        } else if (::strcmp(key, "uplink") == 0) {
+            ::strncpy(status_.uplink, val, sizeof(status_.uplink) - 1);
+            status_.uplink[sizeof(status_.uplink) - 1] = '\0';
         }
 
         *p = saved;
@@ -173,6 +176,8 @@ void UsbLteMonitor::update()
     bool was_present   = status_.present;
     bool was_connected = status_.connected;
     uint8_t prev_rssi  = status_.rssi;
+    char prev_uplink[8];
+    ::strncpy(prev_uplink, status_.uplink, sizeof(prev_uplink));
 
     status_.present = check_interface();
 
@@ -183,6 +188,7 @@ void UsbLteMonitor::update()
         status_.rssi       = 0;
         status_.netmode[0] = '\0';
         status_.oper[0]    = '\0';
+        status_.uplink[0]  = '\0';
         status_.rx_bytes   = 0;
         status_.tx_bytes   = 0;
         return;
@@ -207,13 +213,19 @@ void UsbLteMonitor::update()
         return;
     }
 
+    const char* uplink_str = status_.uplink[0] ? status_.uplink : "unknown";
+
     if (status_.connected != was_connected) {
         if (status_.connected)
-            logger::line("[lte] connected — oper=%s netmode=%s rssi=%u",
-                         status_.oper, status_.netmode, status_.rssi);
+            logger::line("[lte] connected via %s — oper=%s netmode=%s rssi=%u",
+                         uplink_str, status_.oper, status_.netmode, status_.rssi);
         else
             logger::line("[lte] disconnected");
     } else if (status_.connected) {
+        bool uplink_changed = ::strcmp(status_.uplink, prev_uplink) != 0;
+        if (uplink_changed)
+            logger::line("[lte] uplink %s→%s",
+                         prev_uplink[0] ? prev_uplink : "unknown", uplink_str);
         if (status_.rssi != prev_rssi)
             logger::line("[lte] oper=%s netmode=%s rssi=%u→%u",
                          status_.oper, status_.netmode, prev_rssi, status_.rssi);
