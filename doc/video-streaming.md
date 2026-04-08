@@ -6,8 +6,9 @@
 - **SBC**: Raspberry Pi Zero 2W (4-core ARM, 416MB RAM total)
 - **OS**: Debian Trixie (13), kernel 6.12.75
 - **HW Encoder**: bcm2835-codec (`v4l2h264enc` on `/dev/video11`), H.264 baseline/main/high up to level 5.1
-- **Network**: Wired — RPi eth hat -> UTP -> MikroTik cAP -> UTP -> MikroTik hAP -> UTP -> switch -> Win laptop
-- **Link speed**: 100 Mbps (RPi eth hat limit), ~1-2ms RTT, 0% packet loss
+- **Network (wired)**: RPi eth hat -> UTP -> MikroTik cAP -> UTP -> MikroTik hAP -> UTP -> switch -> Win laptop
+- **Network (WiFi)**: RPi onboard WiFi (BCM43438, 2.4GHz only, single-stream 802.11n) -> MikroTik cAP (CAPsMAN managed) -> MikroTik hAP -> switch -> client
+- **Wired link speed**: 100 Mbps (RPi eth hat limit), ~1-2ms RTT, 0% packet loss
 - **Receiver**: QGroundControl on Windows, listens on UDP port 5600 for RTP H.264
 
 ## Camera Sensor Modes
@@ -161,10 +162,61 @@ Requires GStreamer installed on Windows (installed at `C:\gstreamer\1.0\x86_64\`
 - **Build GStreamer from source**: Newer libcamera GStreamer plugin may support DMABuf export
 - **Custom QGC build**: Reduce internal jitter buffer for lower latency
 - **systemd service**: Auto-start streaming on boot (not yet configured)
+- **USB WiFi adapter with 5GHz**: Would bypass the BCM43438's 2.4GHz single-stream limitation, enabling higher bitrate streaming over WiFi
 
 ## Network Test Data
+
+### Wired (Ethernet hat)
 
 iperf3 UDP test (4 Mbps target):
 - Sustained 4.00 Mbits/sec with 0% packet loss
 - Jitter: 0.1-2.0ms
 - Link can handle much more (100 Mbps wired)
+
+### WiFi (BCM43438, 2.4GHz 802.11n)
+
+RPi WiFi chip: Broadcom BCM43438, 2.4GHz only, single spatial stream, max link rate 54-72 Mbps (802.11n HT20).
+
+**Home network setup**: 2x MikroTik cAP + 1x MikroTik hAP, all managed by CAPsMAN on hAP. SSID: S_HOME.
+
+**Problems found and fixed (2026-04-07)**:
+
+1. **Co-channel interference**: Both 2.4GHz APs (cap1-1, cap2-1) on the same channel (Ch 1 / 2412 MHz).
+   Fix: Separated channels — cap1-1 on Ch 1 (2412 MHz), cap2-1 on Ch 11 (2462 MHz). Ch 6 was tried first but had neighbor AP interference (SC9S at -65 dBm).
+
+2. **WiFi power save**: RPi's BCM43438 had power save enabled by default, causing periodic 50-90ms latency spikes.
+   Fix: `sudo iw dev wlan0 set power_save off` + `nmcli con modify S_HOME 802-11-wireless.powersave 2` (persistent).
+
+3. **Uncontrolled roaming**: RPi would associate with distant cap1-1 instead of nearby cap2-1.
+   Fix: BSSID-pinned to cap2-1 via `nmcli con modify S_HOME 802-11-wireless.bssid 04:F4:1C:4B:F0:77`.
+
+4. **CAPsMAN access-list too aggressive**: -65 dBm threshold caused a kick-reconnect loop every 60s.
+   Fix: Relaxed to -75 dBm with 30s grace, then disabled entirely (not needed with BSSID pinning).
+
+5. **CAPsMAN WPA1+WPA2 mixed mode**: Changed to WPA2-only (`security.authentication-types=wpa2-psk`).
+
+6. **brcmfmac firmware bug (BCM43430 firmware 7.45.96)**: The firmware has an internal ~60s timer that triggers a locally-generated deauthentication (reason=3), resetting the radio and regulatory domain. This causes `completed -> disconnected` every 60 seconds regardless of AP configuration. Root cause: firmware's `ccode=ALL` conflicts with AP's country IE (UA), triggering periodic `CTRL-EVENT-REGDOM-CHANGE` cycles. Changing NVRAM `ccode=UA` did not fix it — the firmware ignores the NVRAM parameter for this chip variant (43436s).
+   Mitigation: Limited wpa_supplicant scan to channel 11 only (`wpa_cli set_network 0 scan_freq 2462`), reducing reconnect time from 5-6 seconds to sub-second. Persisted via NM dispatcher script at `/etc/NetworkManager/dispatcher.d/99-scan-freq`.
+
+7. **cAP2 default config cleanup**: Removed leftover DHCP server, DNS resolver, UPnP, NAT masquerade, stale DNS records, disabled `detect-internet`.
+
+**iperf3 UDP results after fix** (RPi 192.168.50.154 -> Mac 192.168.50.46, 30s each, 1316-byte packets simulating H264 RTP):
+
+| Target bitrate | Received bitrate | Jitter | Packet loss | Lost/Total | Verdict |
+|---------------|-----------------|--------|-------------|------------|---------|
+| 5 Mbps | 4.96 Mbps | 0.26 ms | 0.81% | 116/14,249 | Good for 1080p streaming |
+| 10 Mbps | 9.89 Mbps | 0.80 ms | 1.02% | 291/28,497 | Borderline, occasional artifacts |
+| 25 Mbps | 22.32 Mbps | 0.72 ms | 10.38% | 7,392/71,240 | Unusable, exceeds radio capacity |
+
+**WiFi throughput ceiling**: Effective max ~15-20 Mbps before packet loss becomes unacceptable. For 1080p H264 at 5-8 Mbps the link is comfortably within safe margins.
+
+**RPi WiFi connection details**:
+- Connected AP: cap2-1 (BSSID 04:F4:1C:4B:F0:77), channel 11 (2462 MHz)
+- Signal: 90-94/100 (-25 to -30 dBm)
+- Link speed: 54 Mbps (HT20 negotiated)
+- RPi MAC: 2C:CF:67:91:18:41
+- Power save: off
+- Firmware roaming: off (roamoff=1)
+- Scan freq: 2462 only (fast reconnect after firmware disconnect)
+
+**Known limitation**: brcmfmac firmware disconnects every ~60s (reason=3, locally_generated). With scan_freq limited to ch11, reconnect is sub-second — ping shows 0% loss, with occasional ~80ms spike at reconnect moment. Acceptable for 5 Mbps H264 streaming.
