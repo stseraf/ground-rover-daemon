@@ -486,6 +486,75 @@ dnsmasq behaves the same way (~37% when WiFi hotspot is active). It does not aff
 
 ---
 
+## Remote Access (CGNAT + VPN)
+
+### IP address type
+
+The modem receives a **private IP on `rmnet0`** from the carrier — not a public routable address:
+
+```
+rmnet0: inet 10.1.228.249/30   ← private, assigned by KYIVSTAR
+External (seen from internet):  46.211.43.50  ← shared with other subscribers
+```
+
+Verify:
+```bash
+adb shell ip addr show rmnet0
+curl --interface usb0 https://api.ipify.org
+```
+
+If `rmnet0` shows `10.x`, `172.16-31.x`, `192.168.x`, or `100.64-100.127.x` (CGNAT range), you are behind carrier NAT. This is the case for KYIVSTAR consumer SIMs (and most LTE carriers globally).
+
+**Consequence: no inbound connections are possible over LTE.** Port forwarding on the modem cannot help — packets from the internet never reach the modem's public IP because the carrier owns it.
+
+---
+
+### Tailscale (recommended)
+
+[Tailscale](https://tailscale.com) creates a WireGuard-based mesh VPN between devices. Install on both the Pi and the ground station machine; each device gets a stable `100.x.x.x` address reachable from anywhere regardless of the underlying network.
+
+```bash
+# On Pi
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# On ground station — install Tailscale and sign in with the same account
+```
+
+After setup:
+- QGC connects to `100.x.x.x:14550` (Pi's Tailscale IP) — works over LTE or WiFi transparently
+- SSH: `ssh pi@100.x.x.x`
+- Pi's Tailscale address is stable across network changes (LTE ↔ WiFi switch)
+- Free tier: up to 3 users / 100 devices
+
+Check whether the connection is direct P2P or going through a relay server:
+```bash
+tailscale status
+# Look for "direct" (good — P2P) or "relay" (traffic via Tailscale DERP server)
+```
+
+---
+
+### Encryption overhead
+
+Tailscale uses **WireGuard** for encryption. WireGuard is designed for low overhead:
+
+- CPU cost: ~0.1 ms per packet on ARM (negligible on Pi Zero 2W)
+- The measured LTE latency is ~50 ms — encryption adds nothing noticeable
+- Throughput tested: LTE 22.9 Mbit/s down / 40.1 Mbit/s up — well within video streaming budget
+
+The real latency variable is whether Tailscale establishes a **direct P2P tunnel** or falls back to a **DERP relay**. Direct P2P is normal when one side (ground station) has a real public IP; relay adds one extra hop (~10–50 ms).
+
+---
+
+### Alternative: raw WireGuard via VPS
+
+If the ground station also has a real public IP (typical home ISP), you can skip Tailscale and run WireGuard directly — the Pi initiates an outbound connection to the ground station. This avoids any coordination server and has identical encryption overhead.
+
+If neither endpoint has a real public IP, a cheap VPS (Hetzner, DigitalOcean) can act as a WireGuard relay — full control, no third-party service dependency.
+
+---
+
 ## Notes
 
 - Firmware locale is `zh-CN` (Chinese OEM), but the modem works globally.
