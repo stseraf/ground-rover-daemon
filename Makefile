@@ -91,12 +91,34 @@ deploy:
 # Deploy modem config to a fresh/replacement UZ801 dongle via ADB.
 # Copies scripts to the Pi and runs deploy-modem.sh there (adb is on the Pi).
 # Usage: make deploy-modem [RPI=pi@pi-rover.lan]
-deploy-modem:
+deploy-modem: _deploy-modem-push verify-modem
+
+_deploy-modem-push:
 	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
 	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh \
 	    deploy/modem/lte_status_srv.sh deploy/modem/deploy-modem.sh \
+	    deploy/modem/verify-modem.sh \
 	    $(RPI):/tmp/modem-deploy/
-	ssh $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh"
+	ssh -o ServerAliveInterval=3 -o ServerAliveCountMax=1 $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh" 2>/dev/null; \
+	echo ""; \
+	echo "SSH dropped — modem is rebooting, waiting for it to come back..."
+
+# Verify modem health after deploy/reboot.
+# SSH may drop during modem reboot if Pi routes traffic through the modem,
+# so verification polls until the Pi is reachable again.
+# Usage: make verify-modem [RPI=pi@pi-rover.lan]
+verify-modem:
+	@echo "Waiting for Pi to be reachable (up to 90s)..."; \
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do \
+	    ssh -o ConnectTimeout=5 -o BatchMode=yes $(RPI) true 2>/dev/null \
+	        && echo "  [OK] Pi reachable" && break; \
+	    echo "  ...$$((i * 5))s elapsed, retrying..."; \
+	    sleep 5; \
+	done; \
+	ssh -o ConnectTimeout=1 -o BatchMode=yes $(RPI) true 2>/dev/null \
+	    || (echo "  [FAIL] Cannot reach $(RPI) — is the modem up?"; exit 1)
+	scp deploy/modem/verify-modem.sh $(RPI):/tmp/modem-deploy/verify-modem.sh
+	ssh $(RPI) "bash /tmp/modem-deploy/verify-modem.sh"
 
 # Configure static IP on Pi's RNDIS USB interface (usb0) for LTE modem tethering.
 # Replaces dnsmasq DHCP — Pi uses 192.168.100.100/24 with GW 192.168.100.1.
@@ -130,4 +152,4 @@ modem-cpu:
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy deploy-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu clean
+.PHONY: all build rebuild deploy deploy-modem _deploy-modem-push verify-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu clean

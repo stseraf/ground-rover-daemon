@@ -39,7 +39,14 @@ while true; do
     fi
 
     # Active uplink: which interface is the current default route (rmnet0 or wlan0)?
-    DEFAULT_DEV=$(ip route show default 2>/dev/null | head -1 | grep -o 'dev [^ ]*' | cut -d' ' -f2)
+    # Parse with shell builtins only (Android 4.4 shell lacks head/cut/awk/sed).
+    DEFAULT_DEV=
+    ROUTE=$(ip route 2>/dev/null | grep "^default ")
+    set -- $ROUTE
+    while [ $# -gt 0 ]; do
+        [ "$1" = "dev" ] && { DEFAULT_DEV=$2; break; }
+        shift
+    done
     case "$DEFAULT_DEV" in
         wlan0)  UPLINK=wifi ;;
         rmnet0) UPLINK=lte  ;;
