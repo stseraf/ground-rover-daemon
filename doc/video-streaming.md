@@ -115,6 +115,32 @@ gst-launch-1.0 libcamerasrc ! \
   udpsink host=192.168.50.59 port=5600 sync=false
 ```
 
+### Option A2: Pure GStreamer (1296x720, 16:9 full horizontal FOV)
+
+Full horizontal sensor coverage with 16:9 crop — keeps the same wide FOV as A but fits 16:9 displays. Captures 1296x972 from sensor, crops 126px top+bottom via `videocrop` to produce 1296x720. ~58% CPU (+8% over A due to NV21 CPU copy in videocrop).
+
+Note: `ScalerCrop` on `libcamerasrc` is not a valid GStreamer property. Requesting 1296x729 directly fails (no matching sensor mode). 1296x720 is required — 720 is 16-pixel aligned, 729 is not.
+
+**RPi (sender):**
+
+```bash
+gst-launch-1.0 libcamerasrc ! \
+  'video/x-raw,width=1296,height=972,framerate=30/1' ! \
+  videocrop top=126 bottom=126 ! \
+  v4l2h264enc extra-controls="controls,repeat_sequence_header=1,video_bitrate=5000000" ! \
+  'video/x-h264,level=(string)4' ! \
+  h264parse config-interval=-1 ! \
+  rtph264pay config-interval=1 pt=96 mtu=1400 ! \
+  udpsink host=192.168.50.59 port=5600 sync=false
+```
+
+**Mac receiver (low-latency, bypasses QGC):**
+
+```bash
+gst-launch-1.0 udpsrc port=5600 caps="application/x-rtp,encoding-name=H264,payload=96" ! \
+  rtpjitterbuffer latency=0 ! rtph264depay ! avdec_h264 ! autovideosink sync=false
+```
+
 ### Option B: rpicam-vid + GStreamer RTP (1080p, lower CPU)
 
 Use when 1080p 16:9 is needed. DMABuf zero-copy internally, ~47% CPU.

@@ -99,7 +99,7 @@ if [ -f "$WIFI_CONF" ]; then
         DHCP_PID=$(pidof dhcpcd 2>/dev/null)
         [ -n "$DHCP_PID" ] && kill $DHCP_PID 2>/dev/null && sleep 1
 
-        dhcpcd $WIFI_IFACE 2>/dev/null
+        dhcpcd -h pi-rover $WIFI_IFACE 2>/dev/null
         sleep 3
 
         # Check if dhcpcd set a default route via wlan0 (any default route on wlan0 = success)
