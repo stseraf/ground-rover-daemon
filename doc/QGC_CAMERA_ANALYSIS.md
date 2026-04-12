@@ -163,3 +163,114 @@ udpsrc uri="udp://0.0.0.0:<port>"
 | Listens on `udp://0.0.0.0:5600` automatically? | Only as the VideoSettings **fallback default** when no MAVLink camera is present. Otherwise uses the URI from msg 269. |
 | Uses URI from msg 269? | **Yes** — primary source for pipeline URI. |
 | Specific RTP packetization (pt, mtu)? | **No `pt` set** — GStreamer auto-detects from caps. **No `mtu` set** — GStreamer default (1400 bytes). Clock-rate is hardcoded to `90000` Hz in the caps string. |
+
+---
+
+## Q7 — What `VehicleCameraControl::_initWhenReady()` Actually Waits On
+
+**Source:** [VehicleCameraControl.cc:139-143](src/Camera/VehicleCameraControl.cc#L139-L143), [VehicleCameraControl.cc:182-211](src/Camera/VehicleCameraControl.cc#L182-L211), [VehicleCameraControl.cc:2110-2262](src/Camera/VehicleCameraControl.cc#L2110-L2262), [VehicleCameraControl.cc:2266-2275](src/Camera/VehicleCameraControl.cc#L2266-L2275), [QGCCameraIO.cc:262-279](src/Camera/QGCCameraIO.cc#L262-L279), [QGCCameraIO.cc:336-360](src/Camera/QGCCameraIO.cc#L336-L360)
+
+`_initWhenReady()` does **not** block on camera parameters, `CAMERA_SETTINGS`, `STORAGE_INFORMATION`, or stream info. It is entered once camera definition handling is complete enough to proceed.
+
+### What gates entry into `_initWhenReady()`
+
+| Condition | What happens |
+|---|---|
+| `cam_definition_uri[0] == 0` | Constructor calls `_initWhenReady()` immediately. |
+| Cached XML exists and parses | `_handleDefinitionFile()` emits `dataReady(bytes)`, then `_dataReady()` calls `_initWhenReady()`. |
+| HTTP download succeeds or fails | `_downloadFinished()` emits `dataReady(data)`; `_dataReady()` then calls `_initWhenReady()` even if `data` is empty. |
+| MAVLink FTP download succeeds | `_ftpDownloadComplete()` emits `dataReady(bytes)`; `_dataReady()` then calls `_initWhenReady()`. |
+| Definition download fails | `_dataReady()` tries an offline definition file, then still calls `_initWhenReady()`. |
+
+So the real gate is: **camera definition URI resolution/parsing path has finished**. It is not waiting for any runtime MAVLink state message.
+
+### What `_initWhenReady()` starts, but does not wait for
+
+| Startup action | Triggered by `_initWhenReady()`? | Waited on before return? |
+|---|---|---|
+| `PARAM_EXT_REQUEST_LIST` for camera params | **Yes**, for non-basic cameras | **No** |
+| `CAMERA_SETTINGS` request | **Yes**, after 500 ms | **No** |
+| video stream discovery | **Yes**, after 1000 ms | **No** |
+| capture status polling | **Yes**, after 1500 ms | **No** |
+| storage info request | **Yes**, after 2000 ms | **No** |
+
+### What “basic camera” means here
+
+`isBasic()` is defined as `_settings.size() == 0`. That means a camera is treated as “basic” if no settings were loaded from the camera definition file. For a basic camera:
+
+- `_paramComplete` is set immediately.
+- `parametersReady()` is emitted immediately.
+- No `PARAM_EXT_REQUEST_LIST` is sent.
+
+### When parameters are actually considered ready
+
+For non-basic cameras, `_initWhenReady()` only starts parameter loading. Parameter readiness is completed later:
+
+1. `_requestAllParameters()` sends `PARAM_EXT_REQUEST_LIST`.
+2. Each camera setting has a `QGCCameraParamIO`.
+3. Each `QGCCameraParamIO` marks itself done when it:
+   - receives `PARAM_EXT_VALUE`,
+   - times out after retries,
+   - or is write-only.
+4. `_paramDone()` checks whether all `QGCCameraParamIO` instances are done.
+5. Only then does `VehicleCameraControl` set `_paramComplete = true` and emit `parametersReady()`.
+
+Net: `_initWhenReady()` is a **bootstrap point**, not a “camera fully ready” barrier.
+
+---
+
+## Q8 — What Causes a `VehicleCameraControl` To Be Destroyed or Reset
+
+**Source:** [QGCCameraManager.cc:153-163](src/Camera/QGCCameraManager.cc#L153-L163), [QGCCameraManager.cc:257-274](src/Camera/QGCCameraManager.cc#L257-L274), [QGCCameraManager.cc:279-319](src/Camera/QGCCameraManager.cc#L279-L319), [Vehicle.cc:367-390](src/Vehicle/Vehicle.cc#L367-L390), [MultiVehicleManager.cc:216-219](src/Vehicle/MultiVehicleManager.cc#L216-L219), [MultiVehicleManager.cc:243-264](src/Vehicle/MultiVehicleManager.cc#L243-L264), [VehicleCameraControl.cc:572-582](src/Camera/VehicleCameraControl.cc#L572-L582), [VehicleCameraControl.cc:680-700](src/Camera/VehicleCameraControl.cc#L680-L700)
+
+### Creation path
+
+`VehicleCameraControl` is created only after this sequence:
+
+1. `QGCCameraManager` sees a heartbeat from a camera component ID.
+2. It creates a `CameraStruct` and begins requesting `CAMERA_INFORMATION`.
+3. When `CAMERA_INFORMATION` arrives, `_handleCameraInfo()` decodes it and calls:
+   `firmwarePlugin()->createCameraControl(&info, _vehicle, message.compid, this)`.
+4. The resulting `VehicleCameraControl` is added to the manager list.
+
+So a new `VehicleCameraControl` instance is created from **successful `CAMERA_INFORMATION` reception**, not from parameter readiness and not from stream info.
+
+### Destroyed because the camera disappears
+
+If QGC has already received `CAMERA_INFORMATION` for a camera and then heartbeat stops for more than 5 seconds:
+
+- `QGCCameraManager::_checkForLostCameras()` finds the corresponding control,
+- removes it from `_cameras` / `_cameraLabels`,
+- calls `pCamera->deleteLater()`,
+- deletes the corresponding `CameraStruct`,
+- resets current camera selection.
+
+This is the main per-camera destruction path during normal runtime.
+
+### Destroyed because the owning vehicle is deleted
+
+When a vehicle is removed:
+
+1. `MultiVehicleManager` emits `vehicleRemoved(vehicle)`.
+2. It calls `vehicle->prepareDelete()`.
+3. `Vehicle::prepareDelete()` deletes `_cameraManager` immediately and sets it to `nullptr`.
+
+Since each `VehicleCameraControl` is created with the camera manager as parent, deleting the manager destroys all camera controls under it as well.
+
+### Reset does not recreate the object
+
+`VehicleCameraControl::resetSettings()` sends `MAV_CMD_RESET_CAMERA_SETTINGS`. On accepted ACK:
+
+- basic cameras re-request `CAMERA_SETTINGS`;
+- non-basic cameras re-request camera parameters and then re-request `CAMERA_SETTINGS`.
+
+This is an **in-place reprobe/reload** of the existing `VehicleCameraControl`. It does **not** destroy and recreate the object.
+
+### Summary table
+
+| Event | Reuses same `VehicleCameraControl`? | Creates new object? | Destroys old object? |
+|---|---|---|---|
+| `MAV_CMD_RESET_CAMERA_SETTINGS` accepted | **Yes** | No | No |
+| camera stops heartbeating for >5 s | No | Not immediately | **Yes** |
+| vehicle removed from `MultiVehicleManager` | No | No | **Yes** |
+| fresh `CAMERA_INFORMATION` after camera discovery | N/A | **Yes** | No |
