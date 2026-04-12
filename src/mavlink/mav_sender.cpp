@@ -162,7 +162,8 @@ void MavSender::send_camera_information(uint8_t cam_comp_id, const RoverState& s
     info.firmware_version = 1;
     info.resolution_h = cam.max_w;
     info.resolution_v = cam.max_h;
-    info.flags        = CAMERA_CAP_FLAGS_HAS_VIDEO_STREAM;
+    info.flags        = CAMERA_CAP_FLAGS_HAS_VIDEO_STREAM |
+                        CAMERA_CAP_FLAGS_CAPTURE_VIDEO;
     std::strncpy(reinterpret_cast<char*>(info.vendor_name), "Rover",    32);
     std::strncpy(reinterpret_cast<char*>(info.model_name),  cam.model,  32);
     mavlink_message_t msg;
