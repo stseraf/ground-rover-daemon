@@ -37,7 +37,9 @@ SRCS = src/main.cpp \
        src/mavlink/mav_sender.cpp \
        src/mavlink/param_store.cpp \
        src/mavlink/command_handlers.cpp \
-       src/mavlink/camera_handlers.cpp
+       src/mavlink/camera_handlers.cpp \
+       src/camera/camera_discovery.cpp \
+       src/camera/gst_pipeline.cpp
 
 ifeq ($(DRIVER),tb6612)
   SRCS += src/motor/tb6612_driver.cpp
@@ -58,13 +60,12 @@ endif
 HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
+          $(wildcard src/camera/*.hpp) \
           $(wildcard src/drive/*.hpp) \
           $(wildcard src/motor/*.hpp) \
           $(wildcard src/gimbal/*.hpp) \
           $(wildcard src/gps/*.hpp) \
-          $(wildcard src/lte/*.hpp) \
-          $(wildcard include/gps_fix.hpp) \
-          $(wildcard include/lte_status.hpp)
+          $(wildcard src/lte/*.hpp)
 
 TARGET = build/ground_rover_daemon
 

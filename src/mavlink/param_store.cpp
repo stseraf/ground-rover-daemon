@@ -15,6 +15,7 @@ ParamStore::ParamStore()
     params_[2] = {"DRIVE_TRIM",      0.0f};
     params_[3] = {"CTRL_TIMEOUT_MS", static_cast<float>(Config::MC_TIMEOUT_US / 1000)};
     params_[4] = {"GPS_RAW_LOG",     0.0f};
+    params_[5] = {"VIDEO_BITRATE",   5000000.0f};
     load(Config::PARAM_FILE);
 }
 

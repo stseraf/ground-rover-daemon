@@ -53,7 +53,8 @@ namespace Config {
         constexpr int         BAUD_RATE = 9600;
     }
 
-    constexpr const char* PARAM_FILE = "params"; // relative to WorkingDirectory
+    constexpr const char* PARAM_FILE  = "params";  // relative to WorkingDirectory
+    constexpr const char* QGC_IP_FILE = "qgc_ip";  // optional override: one IP per line
 
     // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
     namespace Lte {
