@@ -17,7 +17,7 @@ All real-time control, MAVLink protocol, sensor I/O, and safety logic.
 ### Separate / System-level
 | Concern | Approach |
 |---|---|
-| Video streaming | In this repo (`deploy/modem/`, `feat/video-streaming`); GStreamer pipeline on Pi, NAT port-forward via UZ801 modem, RTSP to QGC |
+| Video streaming | In this repo; GStreamer pipeline on Pi, NAT port-forward via UZ801 modem, RTSP to QGC — done (merged dev, PR #10) |
 | LTE networking | UZ801 USB modem; WiFi client uplink on modem + NAT port forwarding to Pi; modem TCP status daemon |
 | RPi Zero 2W deployment | Cross-compile toolchain + systemd unit — done (`deploy/ground-rover-daemon.service`, `make deploy`) |
 
@@ -103,15 +103,20 @@ UZ801 USB modem over `usb0`; no ModemManager — custom TCP status daemon on mod
 
 ---
 
-### Feature 6 — Video Streaming — IN PROGRESS (feat/video-streaming)
+### Feature 6 — Video Streaming — DONE (merged dev, PR #10)
 
 GStreamer pipeline on Pi, streamed to QGC over LTE via NAT port-forward on UZ801 modem.
 
-**Scope:**
-- GStreamer pipeline config + systemd service on Pi
-- NAT port-forward from modem public IP → Pi RTSP port (groundwork done in feature 5)
-- Resolution: Option A2 (1296×720 16:9 crop) under evaluation
-- MAVLink `VIDEO_STREAM_INFORMATION` advertisement from daemon (TBD)
+**Delivered:**
+- Camera discovery: `src/camera/camera_discovery.cpp` — `libcamera-hello --list-cameras`, parses all sensor modes into `CameraInfo`/`SensorMode` structs
+- GStreamer lifecycle: `src/camera/gst_pipeline.cpp` — fork/exec `gst-launch-1.0`, killpg on stop; stream watchdog auto-restarts pipeline on unexpected exit
+- Each camera advertised as a separate MAVLink component (`MAV_COMP_ID_CAMERA+i`) with its own heartbeat and `VIDEO_STREAM_INFORMATION` per sensor mode
+- QGC commands: `VIDEO_START_STREAMING` → spawn pipeline; `VIDEO_STOP_STREAMING` → kill pipeline
+- `VIDEO_BITRATE` param (default 5 Mbps) + `VIDEO_FPS` param control encoder bitrate/framerate
+- `COMMAND_LONG` routed by `target_component`: comp 100+ → camera handlers, comp 1 → autopilot handlers
+- QGC status messages sent on stream start/stop and watchdog restart
+- Stream names: `"1296x972 46.34fps full"` format (≤31 chars); `"full"` = full sensor, `"crop"` = center crop
+- NAT port-forward: modem public IP → Pi RTSP port (delivered in feature 5 infra)
 
 ---
 
@@ -144,10 +149,10 @@ support. Mode switching will be triggered via `COMMAND_LONG` / `SET_MODE`, not Q
 | 3 | ELRS RX + failsafe logic | planned (UART blocked) | 1, 2 |
 | 4 | GPS module + MAVLink telemetry | done (2026-03-30) | — |
 | 5 | LTE link monitoring (UZ801 USB modem) | done (PR #9) | — |
-| 6 | Video streaming (GStreamer + NAT forward) | in-progress | 5 |
+| 6 | Video streaming (GStreamer + NAT forward) | done (PR #10) | 5 |
 | 7 | Basic autopilot modes (HOLD, RETURN) | planned | 1, 4 |
 
 Features 1, 2, 4, and 5 had no blocking interdependencies and were built in parallel.
-Feature 6 is the current active work (feat/video-streaming branch).
-Feature 7 is unblocked (depends on 1 and 4, both done).
+Feature 6 is complete (merged dev, PR #10).
+Feature 7 is unblocked (depends on 1 and 4, both done) and is next in line.
 Feature 3 remains blocked on hardware UART availability.
