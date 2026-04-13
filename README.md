@@ -56,23 +56,29 @@ The binary is placed at `build/ground_rover_daemon`.
 
 ## Deploying to RPi
 
-The `deploy` target builds for RPi, copies the binary to `/home/pi/ground-rover-daemon/`, and installs and enables the systemd service — all in one step:
+Default target host: `RPI=pi@pi-rover.lan`. Override any target with `make <target> RPI=pi@192.168.1.x` or set permanently:
 
-```sh
-make deploy
-```
-
-Default: `RPI=pi@pi-rover.lan`. Override as needed:
-
-```sh
-make deploy RPI=pi@192.168.1.x
-```
-
-Set a permanent default in your shell:
 ```sh
 echo 'export RPI=pi@pi-rover.lan' >> ~/.bashrc
 source ~/.bashrc
 ```
+
+### Daemon
+
+| Command | Description |
+|---|---|
+| `make deploy` | Cross-compile for aarch64, stop service, copy binary, install and enable systemd unit |
+
+### UZ801 LTE modem
+
+| Command | Description |
+|---|---|
+| `make deploy-modem` | Push modem scripts via ADB, reboot modem, then automatically verify (waits for Pi to come back) |
+| `make verify-modem` | Check modem health after reboot — polls until Pi is reachable, then verifies NAT, forwarding rules, lte_status_srv, LED state, and active uplink |
+| `make setup-pi-usb` | Configure static IP on Pi's `usb0` (RNDIS) interface for modem tethering |
+| `make setup-modem-wifi WIFI_SSID=<ssid> WIFI_PSK=<psk>` | Write WiFi client config to modem — modem will use home WiFi as uplink instead of LTE |
+| `make remove-modem-wifi` | Remove WiFi config from modem — reverts to LTE-only uplink |
+| `make modem-cpu [INTERVAL=5]` | Sample CPU usage on the modem via ADB |
 
 ## Running
 

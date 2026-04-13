@@ -38,6 +38,21 @@ while true; do
         CONNECTED=0
     fi
 
+    # Active uplink: which interface is the current default route (rmnet0 or wlan0)?
+    # Parse with shell builtins only (Android 4.4 shell lacks head/cut/awk/sed).
+    DEFAULT_DEV=
+    ROUTE=$(ip route 2>/dev/null | grep "^default ")
+    set -- $ROUTE
+    while [ $# -gt 0 ]; do
+        [ "$1" = "dev" ] && { DEFAULT_DEV=$2; break; }
+        shift
+    done
+    case "$DEFAULT_DEV" in
+        wlan0)  UPLINK=wifi ;;
+        rmnet0) UPLINK=lte  ;;
+        *)      UPLINK=unknown ;;
+    esac
+
     # Operator and network type from Android properties
     OPER=$(getprop gsm.operator.alpha)
     NETMODE=$(getprop gsm.network.type)
@@ -69,7 +84,7 @@ while true; do
 $(dumpsys telephony.registry 2>/dev/null)
 DUMPSYS
 
-    STATUS="connected=$CONNECTED rssi=$RSSI netmode=$NETMODE oper=$OPER"
+    STATUS="connected=$CONNECTED rssi=$RSSI netmode=$NETMODE oper=$OPER uplink=$UPLINK"
 
     # Serve status line — nc exits after one connection, then loop restarts listener
     echo "$STATUS" | $NC_CMD

@@ -17,8 +17,8 @@ All real-time control, MAVLink protocol, sensor I/O, and safety logic.
 ### Separate / System-level
 | Concern | Approach |
 |---|---|
-| Video streaming | Standalone systemd service (GStreamer or camera-streamer); daemon advertises RTSP URL via `VIDEO_STREAM_INFORMATION` |
-| LTE networking | ModemManager + NetworkManager; daemon treats it as transparent IP — but monitors signal quality |
+| Video streaming | In this repo (`deploy/modem/`, `feat/video-streaming`); GStreamer pipeline on Pi, NAT port-forward via UZ801 modem, RTSP to QGC |
+| LTE networking | UZ801 USB modem; WiFi client uplink on modem + NAT port forwarding to Pi; modem TCP status daemon |
 | RPi Zero 2W deployment | Cross-compile toolchain + systemd unit — done (`deploy/ground-rover-daemon.service`, `make deploy`) |
 
 ---
@@ -88,17 +88,34 @@ disable serial console via `raspi-config` → `/dev/serial0` resolves to `ttyAMA
 
 ---
 
-### Feature 5 — LTE Link Monitoring — PLANNED (depends on 3)
+### Feature 5 — LTE Link Monitoring — DONE (merged dev, PR #9)
 
-**Scope:**
-- Poll `ModemManager` via D-Bus or `mmcli` subprocess for signal quality (RSSI/RSRP)
-- Send signal strength in `SYS_STATUS` extended fields or custom MAVLink message
-- Configurable drop timeout → same failsafe as ELRS (stop motors / hold)
-- Log LTE state transitions
+UZ801 USB modem over `usb0`; no ModemManager — custom TCP status daemon on modem.
+
+**Delivered:**
+- LTE detection on `usb0` interface at startup; traffic stats logging
+- Modem TCP status daemon replaces HTTP API (eliminates modem CPU busy-loop)
+- Static IP on Pi replaces dnsmasq
+- Active uplink reporting (WiFi vs LTE) in modem status
+- WiFi client uplink on modem + NAT port forwarding to Pi (`deploy/modem/nat_forward.sh`)
+- UZ801 modem deploy automation + LED status daemon
+- `make deploy-modem`: push+reboot and verify stages
 
 ---
 
-### Feature 6 — Basic Autopilot Modes — PLANNED (depends on 1, 4)
+### Feature 6 — Video Streaming — IN PROGRESS (feat/video-streaming)
+
+GStreamer pipeline on Pi, streamed to QGC over LTE via NAT port-forward on UZ801 modem.
+
+**Scope:**
+- GStreamer pipeline config + systemd service on Pi
+- NAT port-forward from modem public IP → Pi RTSP port (groundwork done in feature 5)
+- Resolution: Option A2 (1296×720 16:9 crop) under evaluation
+- MAVLink `VIDEO_STREAM_INFORMATION` advertisement from daemon (TBD)
+
+---
+
+### Feature 7 — Basic Autopilot Modes — PLANNED (depends on 1, 4)
 
 **Scope:**
 - **HOLD mode:** stop motors and hold position using GPS; engage when QGC switches mode
@@ -112,8 +129,7 @@ support. Mode switching will be triggered via `COMMAND_LONG` / `SET_MODE`, not Q
 ---
 
 ## What Is Explicitly Out of Scope (for daemon)
-- Video streaming pipeline (separate systemd service)
-- LTE network bring-up (ModemManager/NetworkManager)
+- LTE network bring-up (ModemManager/NetworkManager) — using raw USB modem instead
 - Cross-compile/deployment scripts — done (`make deploy` + systemd service)
 - Structured logging (spdlog) — simple `logger.hpp` shim is sufficient; spdlog dropped from backlog
 
@@ -127,9 +143,11 @@ support. Mode switching will be triggered via `COMMAND_LONG` / `SET_MODE`, not Q
 | 2 | MAVLink param protocol + persistence | done (2026-03-29) | — |
 | 3 | ELRS RX + failsafe logic | planned (UART blocked) | 1, 2 |
 | 4 | GPS module + MAVLink telemetry | done (2026-03-30) | — |
-| 5 | LTE monitoring + failsafe | planned | 3 |
-| 6 | Basic autopilot modes (HOLD, RETURN) | planned | 1, 4 |
+| 5 | LTE link monitoring (UZ801 USB modem) | done (PR #9) | — |
+| 6 | Video streaming (GStreamer + NAT forward) | in-progress | 5 |
+| 7 | Basic autopilot modes (HOLD, RETURN) | planned | 1, 4 |
 
-Features 1, 2, and 4 had no interdependencies and were built independently.
-Feature 6 is now unblocked (depends on 1 and 4, both done).
-Feature 3 is the current blocker for Feature 5.
+Features 1, 2, 4, and 5 had no blocking interdependencies and were built in parallel.
+Feature 6 is the current active work (feat/video-streaming branch).
+Feature 7 is unblocked (depends on 1 and 4, both done).
+Feature 3 remains blocked on hardware UART availability.
