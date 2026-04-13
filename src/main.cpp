@@ -120,6 +120,7 @@ int main()
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
+    char     prev_uplink[8]{}; // edge-detect uplink type changes for STATUSTEXT
     mavlink_message_t msg;
     mavlink_status_t  status;
 
@@ -334,6 +335,29 @@ int main()
             lte.update();
             state.lte    = lte.status();
             last_lte_poll = now;
+
+            // Notify operator when active uplink type changes (LTE ↔ WiFi ↔ disconnected)
+            if (state.qgc_known &&
+                ::strncmp(state.lte.uplink, prev_uplink, sizeof(prev_uplink)) != 0) {
+                char stxt[50]{};
+                if (!state.lte.connected) {
+                    ::snprintf(stxt, sizeof(stxt), "Link: disconnected");
+                    mav.send_statustext(state, MAV_SEVERITY_WARNING, stxt);
+                } else if (::strncmp(state.lte.uplink, "wifi", 4) == 0) {
+                    if (state.lte.wifi_rssi_dbm != 0)
+                        ::snprintf(stxt, sizeof(stxt), "Link: WiFi %d dBm",
+                                   state.lte.wifi_rssi_dbm);
+                    else
+                        ::snprintf(stxt, sizeof(stxt), "Link: WiFi");
+                    mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+                } else {
+                    ::snprintf(stxt, sizeof(stxt), "Link: LTE %.23s %.7s",
+                               state.lte.oper, state.lte.netmode);
+                    mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+                }
+            }
+            ::strncpy(prev_uplink, state.lte.uplink, sizeof(prev_uplink) - 1);
+            prev_uplink[sizeof(prev_uplink) - 1] = '\0';
         }
 
         if (state.armed != prev_armed) {
@@ -403,7 +427,7 @@ int main()
             mav.send_current_mode(state);
             mav.send_gps_raw_int(state);
             mav.send_global_position_int(state);
-            mav.send_cellular_status(state);
+            mav.send_radio_status(state);
             // One heartbeat per discovered camera component
             for (int i = 0; i < static_cast<int>(state.cameras.size()); ++i)
                 mav.send_camera_heartbeat(

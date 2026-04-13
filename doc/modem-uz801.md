@@ -367,7 +367,7 @@ adb shell "echo 0   > /sys/class/leds/red/brightness"
 | `adbd`               | running | ADB daemon                                     |
 | `thermal-engine`     | running | Thermal management                             |
 | `led_status.sh`      | running | LED connectivity indicator (launched by nat_forward.sh) |
-| `lte_status_srv.sh`  | running | TCP server on port 8080 — LTE signal/operator info for Pi daemon |
+| `lte_status_srv.sh`  | running | TCP server on port 8080 — LTE + WiFi signal/operator info for Pi daemon |
 | `wpa_supplicant`     | running (WiFi) / stopped (LTE) | WiFi client — runs when `rover_wpa.conf` present and association succeeds |
 | `com.mifiservice.hello` | disabled | WiFi hotspot manager — permanently disabled |
 | `hostapd`            | stopped | WiFi AP — not started                          |
@@ -590,11 +590,67 @@ After a cold power cycle, the WCNSS WiFi chip can take anywhere from 0s to 60+ s
 finish firmware initialization before wpa_supplicant can use it. On a warm reboot (module
 already loaded) it is typically instant. The 90s association timeout accommodates the worst case.
 
+**8. WiFi RSSI is only readable via wpa_cli, not dumpsys or /proc**
+`dumpsys wifi` always returns `RSSI: -9999` because the Android WiFi framework (`WifiService`)
+is in `UNINITIALIZED` state — wpa_supplicant was started directly, bypassing the framework.
+`/proc/net/wireless` always shows zeros because the Qualcomm WCNSS driver does not populate it.
+The only working source is `wpa_cli -p /data/misc/wifi/sockets -iwlan0 signal_poll`, which
+queries wpa_supplicant directly. Returns `FAIL` when not associated (safe to parse — `atoi("FAIL") = 0`).
+
 **7. Android 4.4 shell is missing most Unix tools**
 `tr`, `cut`, `awk`, `sed`, `killall`, `printf`, `tail` — none available. Use only `grep` and
 POSIX shell builtins. For example, parse `ip route` output with `set -- $line; field=$3` instead
 of `awk '{print $3}'`; check wpa_cli state with `grep -q "wpa_state=COMPLETED"` instead of
 piping through `cut`.
+
+---
+
+## LTE Status Server
+
+`lte_status_srv.sh` runs as a TCP server on port **8080** (`192.168.100.1:8080`). The Pi daemon
+connects every 5 seconds and reads one line of `key=value` pairs, then the server loops and waits
+for the next connection.
+
+### Status line format
+
+```
+connected=1 rssi=27 netmode=LTE oper=KYIVSTAR uplink=wifi wifi_rssi=-65
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `connected` | `0`/`1` | LTE data active — `net.rmnet0.dns1` is non-empty |
+| `rssi` | `0–31` | LTE signal strength (AT+CSQ scale; `0` = unknown) |
+| `netmode` | string | Network type from `gsm.network.type` (`LTE`, `UMTS`, `EDGE`, …) |
+| `oper` | string | Operator name from `gsm.operator.alpha` |
+| `uplink` | `lte`/`wifi`/`unknown` | Active default-route interface (`rmnet0` → `lte`, `wlan0` → `wifi`) |
+| `wifi_rssi` | `−10` to `−100` dBm, or `0` | WiFi AP signal strength; `0` when LTE uplink or not associated |
+
+### WiFi RSSI source
+
+Three approaches were evaluated on this modem — only one works:
+
+| Source | Result | Reason |
+|--------|--------|--------|
+| `dumpsys wifi \| grep RSSI` | Always `-9999` | Android WiFi framework is `UNINITIALIZED` — WiFi is managed below the framework level |
+| `/proc/net/wireless` | Always `0 0 0` | Qualcomm WCNSS driver does not populate this kernel file |
+| `wpa_cli -p /data/misc/wifi/sockets -iwlan0 signal_poll` | **Correct RSSI** | Queries wpa_supplicant directly; returns `RSSI=-65\nLINKSPEED=86\n…` or `FAIL` if not associated |
+
+The script only calls `wpa_cli` when `uplink=wifi`; on LTE uplink `wifi_rssi=0` is sent.
+
+### How the Pi daemon uses this data
+
+The daemon encodes both signals into a MAVLink **RADIO_STATUS** (message ID 109) sent at 1 Hz to QGroundControl:
+
+| RADIO_STATUS field | WiFi uplink | LTE uplink |
+|--------------------|-------------|------------|
+| `rssi` | WiFi AP dBm (int8\_t as uint8\_t) | LTE dBm (`−113 + 2×CSQ`) |
+| `remrssi` | LTE dBm (background signal) | `0` |
+| `txbuf` | `50` (sentinel: WiFi active) | `100` (sentinel: LTE active) |
+
+QGC displays `rssi` as **Local RSSI** and `remrssi` as **Remote RSSI** in the Telemetry RSSI Status widget. The signal icon appears automatically when `rssi > 0`.
+
+> **Why not CELLULAR_STATUS (ID 334)?** QGC's codebase has no handler for message 334 — it is never decoded and no widget appears. RADIO_STATUS is fully supported.
 
 ---
 

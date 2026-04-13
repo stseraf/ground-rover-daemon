@@ -205,11 +205,8 @@ void NmeaGpsProvider::parse_gsv(const char* line)
         vis_glo_ = total;
 
     uint8_t vis_total = vis_gps_ + vis_glo_;
-    if (vis_total != prev_vis_total_) {
-        logger::line("[gps] visible satellites: %u  (GPS=%u GLONASS=%u)",
-                     vis_total, vis_gps_, vis_glo_);
+    if (vis_total != prev_vis_total_)
         prev_vis_total_ = vis_total;
-    }
 }
 
 // $GNTXT — log antenna status changes and firmware model on boot

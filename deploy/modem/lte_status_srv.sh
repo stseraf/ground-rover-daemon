@@ -59,6 +59,23 @@ while true; do
     [ -z "$OPER" ]    && OPER=unknown
     [ -z "$NETMODE" ] && NETMODE=unknown
 
+    # WiFi AP signal strength via wpa_supplicant (dumpsys wifi returns -9999,
+    # /proc/net/wireless is all zeros on this modem — driver doesn't populate it).
+    # wpa_cli output: "RSSI=-65\nLINKSPEED=...\n..." or "FAIL" if not associated.
+    WIFI_RSSI=0
+    if [ "$UPLINK" = "wifi" ]; then
+        while read line; do
+            case $line in
+                RSSI=*)
+                    WIFI_RSSI=${line#RSSI=}
+                    break
+                    ;;
+            esac
+        done << WPACLI
+$(wpa_cli -p /data/misc/wifi/sockets -iwlan0 signal_poll 2>/dev/null)
+WPACLI
+    fi
+
     # RSSI from telephony registry.
     # SignalStrength format: gsm_ss gsm_ber cdma_dbm cdma_ecio evdo_dbm evdo_ecio evdo_snr lte_ss lte_rsrp ...
     # Field 1 = GSM signal (99=unknown), field 8 = LTE signal strength (0-31 scale, -1=unknown).
@@ -84,7 +101,7 @@ while true; do
 $(dumpsys telephony.registry 2>/dev/null)
 DUMPSYS
 
-    STATUS="connected=$CONNECTED rssi=$RSSI netmode=$NETMODE oper=$OPER uplink=$UPLINK"
+    STATUS="connected=$CONNECTED rssi=$RSSI netmode=$NETMODE oper=$OPER uplink=$UPLINK wifi_rssi=$WIFI_RSSI"
 
     # Serve status line — nc exits after one connection, then loop restarts listener
     echo "$STATUS" | $NC_CMD

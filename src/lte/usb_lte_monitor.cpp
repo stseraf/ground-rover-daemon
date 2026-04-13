@@ -129,6 +129,10 @@ bool UsbLteMonitor::fetch_signal()
         } else if (::strcmp(key, "uplink") == 0) {
             ::strncpy(status_.uplink, val, sizeof(status_.uplink) - 1);
             status_.uplink[sizeof(status_.uplink) - 1] = '\0';
+        } else if (::strcmp(key, "wifi_rssi") == 0) {
+            int v = ::atoi(val);
+            // Valid WiFi RSSI is -10 to -100 dBm; reject sentinel values like -9999.
+            status_.wifi_rssi_dbm = (v >= -100 && v <= -1) ? static_cast<int8_t>(v) : 0;
         }
 
         *p = saved;
@@ -173,10 +177,11 @@ bool UsbLteMonitor::fetch_traffic()
 
 void UsbLteMonitor::update()
 {
-    bool was_present   = status_.present;
-    bool was_connected = status_.connected;
-    uint8_t prev_rssi  = status_.rssi;
-    char prev_uplink[8];
+    bool    was_present      = status_.present;
+    bool    was_connected    = status_.connected;
+    uint8_t prev_rssi        = status_.rssi;
+    int8_t  prev_wifi_rssi   = status_.wifi_rssi_dbm;
+    char    prev_uplink[8];
     ::strncpy(prev_uplink, status_.uplink, sizeof(prev_uplink));
 
     status_.present = check_interface();
@@ -184,13 +189,14 @@ void UsbLteMonitor::update()
     if (!status_.present) {
         if (was_present)
             logger::line("[lte] modem disconnected (usb0 down)");
-        status_.connected  = false;
-        status_.rssi       = 0;
-        status_.netmode[0] = '\0';
-        status_.oper[0]    = '\0';
-        status_.uplink[0]  = '\0';
-        status_.rx_bytes   = 0;
-        status_.tx_bytes   = 0;
+        status_.connected     = false;
+        status_.rssi          = 0;
+        status_.wifi_rssi_dbm = 0;
+        status_.netmode[0]    = '\0';
+        status_.oper[0]       = '\0';
+        status_.uplink[0]     = '\0';
+        status_.rx_bytes      = 0;
+        status_.tx_bytes      = 0;
         return;
     }
 
@@ -208,8 +214,9 @@ void UsbLteMonitor::update()
             logger::line("[lte] status daemon unreachable — treating as disconnected");
         else
             logger::line("[lte] status daemon not ready yet — retrying next poll");
-        status_.connected = false;
-        status_.rssi      = 0;
+        status_.connected     = false;
+        status_.rssi          = 0;
+        status_.wifi_rssi_dbm = 0;
         return;
     }
 
@@ -217,8 +224,9 @@ void UsbLteMonitor::update()
 
     if (status_.connected != was_connected) {
         if (status_.connected)
-            logger::line("[lte] connected via %s — oper=%s netmode=%s rssi=%u",
-                         uplink_str, status_.oper, status_.netmode, status_.rssi);
+            logger::line("[lte] connected via %s — oper=%s netmode=%s rssi=%u wifi_rssi=%d",
+                         uplink_str, status_.oper, status_.netmode,
+                         status_.rssi, status_.wifi_rssi_dbm);
         else
             logger::line("[lte] disconnected");
     } else if (status_.connected) {
@@ -226,8 +234,9 @@ void UsbLteMonitor::update()
         if (uplink_changed)
             logger::line("[lte] uplink %s→%s",
                          prev_uplink[0] ? prev_uplink : "unknown", uplink_str);
-        if (status_.rssi != prev_rssi)
-            logger::line("[lte] oper=%s netmode=%s rssi=%u→%u",
-                         status_.oper, status_.netmode, prev_rssi, status_.rssi);
+        if (status_.rssi != prev_rssi || status_.wifi_rssi_dbm != prev_wifi_rssi)
+            logger::line("[lte] rssi=%u→%u wifi_rssi=%d→%d",
+                         prev_rssi, status_.rssi,
+                         prev_wifi_rssi, status_.wifi_rssi_dbm);
     }
 }
