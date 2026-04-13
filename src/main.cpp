@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cerrno>
+#include <cstring>
 #include <unistd.h>
 #include <ctime>
 #include <csignal>
@@ -13,6 +14,9 @@
 #include "mavlink/mav_sender.hpp"
 #include "mavlink/param_store.hpp"
 #include "mavlink/command_handlers.hpp"
+#include "mavlink/camera_handlers.hpp"
+#include "camera/camera_discovery.hpp"
+#include "camera/gst_pipeline.hpp"
 #include "drive/diff_drive.hpp"
 #include "motor/uart_motor_driver.hpp"
 #ifdef DRIVER_TB6612
@@ -60,7 +64,11 @@ int main()
 
     {
         struct timespec ts;
+#ifdef __APPLE__
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
         clock_gettime(CLOCK_BOOTTIME, &ts);
+#endif
         logger::line("MAVLink rover daemon started at %lds%03ldms since boot",
                      ts.tv_sec, ts.tv_nsec / 1000000);
     }
@@ -85,10 +93,30 @@ int main()
 #else
     StubLteMonitor lte{};
 #endif
+    // Camera discovery — runs libcamera-hello --list-cameras at startup
+    state.cameras = discover_cameras();
+    state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
+    state.video_fps         = static_cast<uint32_t>(params.get(6));
+
+    // Optional QGC IP override (useful when modem NATs all traffic through gateway)
+    {
+        FILE* f = std::fopen(Config::QGC_IP_FILE, "r");
+        if (f) {
+            char override_ip[INET6_ADDRSTRLEN];
+            if (std::fscanf(f, "%46s", override_ip) == 1) {
+                std::memcpy(state.qgc_ip, override_ip, sizeof(state.qgc_ip));
+                state.qgc_ip_known = true;
+                logger::line("[video] QGC IP from config: %s", state.qgc_ip);
+            }
+            std::fclose(f);
+        }
+    }
+
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
     uint64_t last_hb           = 0;
     uint64_t last_lte_poll     = 0;
+    uint64_t last_gst_monitor  = 0;
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
@@ -101,6 +129,12 @@ int main()
                               state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
             state.qgc_known = true;
+            if (!state.qgc_ip_known) {
+                inet_ntop(AF_INET, &state.qgc_addr.sin_addr,
+                          state.qgc_ip, sizeof(state.qgc_ip));
+                state.qgc_ip_known = true;
+                logger::line("[video] QGC IP: %s", state.qgc_ip);
+            }
             for (ssize_t i = 0; i < n; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, receive_buffer[i], &msg, &status)) {
                     switch (msg.msgid) {
@@ -173,7 +207,30 @@ int main()
                         case MAVLINK_MSG_ID_COMMAND_LONG: {
                             mavlink_command_long_t cmd;
                             mavlink_msg_command_long_decode(&msg, &cmd);
-                            handle_command_long(mav, state, &cmd);
+                            // Route camera commands to the camera handler;
+                            // everything else goes to the autopilot handler.
+                            int cam_idx = -1;
+                            uint8_t tc = cmd.target_component;
+                            if (!state.cameras.empty() &&
+                                tc >= MAV_COMP_ID_CAMERA &&
+                                tc < static_cast<uint8_t>(MAV_COMP_ID_CAMERA +
+                                                           state.cameras.size())) {
+                                cam_idx = tc - MAV_COMP_ID_CAMERA;
+                            }
+                            // QGC sometimes sends camera REQUEST_MESSAGEs to comp 1;
+                            // intercept and route to first camera component.
+                            if (cam_idx < 0 && !state.cameras.empty() &&
+                                cmd.command == MAV_CMD_REQUEST_MESSAGE) {
+                                uint32_t mid = static_cast<uint32_t>(cmd.param1);
+                                if (mid == MAVLINK_MSG_ID_CAMERA_INFORMATION ||
+                                    mid == MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION ||
+                                    mid == MAVLINK_MSG_ID_VIDEO_STREAM_STATUS)
+                                    cam_idx = 0;
+                            }
+                            if (cam_idx >= 0)
+                                handle_camera_command_long(mav, state, &cmd, cam_idx);
+                            else
+                                handle_command_long(mav, state, &cmd);
                             break;
                         }
                         case MAVLINK_MSG_ID_REQUEST_DATA_STREAM: {
@@ -239,6 +296,12 @@ int main()
                                 params.save(Config::PARAM_FILE);
                                 mav.send_param(state, params.name(idx), params.get(idx),
                                                static_cast<uint16_t>(idx), ParamStore::COUNT);
+                                if (std::strncmp(params.name(idx), "VIDEO_BITRATE", 16) == 0)
+                                    state.video_bitrate_bps =
+                                        static_cast<uint32_t>(params.get(idx));
+                                if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0)
+                                    state.video_fps =
+                                        static_cast<uint32_t>(params.get(idx));
                                 logger::line("rx: PARAM_SET(23): %s=%.4f saved", params.name(idx), ps.param_value);
                             } else {
                                 logger::line("rx: PARAM_SET(23): unknown param %.16s", ps.param_id);
@@ -329,6 +392,11 @@ int main()
             state.lte_was_connected = state.lte.connected;
         }
 
+        if (now - last_gst_monitor > Config::GST_MONITOR_INTERVAL_US) {
+            last_gst_monitor = now;
+            gst_monitor_tick(mav, state, now);
+        }
+
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
@@ -336,7 +404,17 @@ int main()
             mav.send_gps_raw_int(state);
             mav.send_global_position_int(state);
             mav.send_cellular_status(state);
+            // One heartbeat per discovered camera component
+            for (int i = 0; i < static_cast<int>(state.cameras.size()); ++i)
+                mav.send_camera_heartbeat(
+                    static_cast<uint8_t>(MAV_COMP_ID_CAMERA + i), state);
             last_hb = now;
         }
+    }
+
+    // Clean shutdown: kill gstreamer if still running
+    if (state.active_gst_pid > 0) {
+        logger::line("[gst] shutdown — stopping stream PID %d", state.active_gst_pid);
+        gst_kill(state.active_gst_pid);
     }
 }

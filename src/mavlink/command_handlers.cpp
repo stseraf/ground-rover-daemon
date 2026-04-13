@@ -1,5 +1,4 @@
 #include "command_handlers.hpp"
-#include "camera_handlers.hpp"
 #include "mav_sender.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
@@ -57,12 +56,6 @@ void handle_request_message(MavSender& mav, RoverState& state,
                                  cmd->target_system, cmd->target_component);
             mav.send_available_modes(state, static_cast<uint32_t>(cmd->param2));
             break;
-        case MAVLINK_MSG_ID_CAMERA_INFORMATION:
-        case MAVLINK_MSG_ID_CAMERA_SETTINGS:
-        case MAVLINK_MSG_ID_STORAGE_INFORMATION:
-        case MAVLINK_MSG_ID_CAMERA_CAPTURE_STATUS:
-            handle_camera_request_message(mav, state, cmd);
-            break;
         default:
             logger::line("Unknown REQUEST_MESSAGE(%u): MAV_RESULT_UNSUPPORTED", msg_id);
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
@@ -103,15 +96,14 @@ void handle_command_long(MavSender& mav, RoverState& state,
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
                                  cmd->target_system, cmd->target_component);
             break;
-        case MAV_CMD_REQUEST_CAMERA_INFORMATION:
-        case MAV_CMD_REQUEST_CAMERA_SETTINGS:
-        case MAV_CMD_REQUEST_STORAGE_INFORMATION:
-            logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): camera command(%u)",
-                         static_cast<uint32_t>(cmd->command));
-            handle_camera_command_long(mav, state, cmd);
-            break;
         case MAV_CMD_MISSION_START:
             logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_MISSION_START(300): MAV_RESULT_UNSUPPORTED");
+            mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
+                                 cmd->target_system, cmd->target_component);
+            break;
+        case MAV_CMD_REQUEST_CAMERA_INFORMATION: // deprecated, misdirected to autopilot
+        case MAV_CMD_SET_CAMERA_ZOOM:
+        case MAV_CMD_SET_CAMERA_FOCUS:
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
                                  cmd->target_system, cmd->target_component);
             break;

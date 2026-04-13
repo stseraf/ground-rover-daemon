@@ -7,7 +7,8 @@ namespace Config {
     constexpr uint8_t  MAV_COMP_ID = 1;
 
     constexpr uint16_t UDP_BIND_PORT         = 14550;
-    constexpr uint64_t HEARTBEAT_INTERVAL_US = 1'000'000;
+    constexpr uint64_t HEARTBEAT_INTERVAL_US  = 1'000'000;
+    constexpr uint64_t GST_MONITOR_INTERVAL_US = 3'000'000;  // 3 s
     constexpr uint64_t LOOP_SLEEP_US         = 1'000;
 
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
@@ -53,7 +54,8 @@ namespace Config {
         constexpr int         BAUD_RATE = 9600;
     }
 
-    constexpr const char* PARAM_FILE = "params"; // relative to WorkingDirectory
+    constexpr const char* PARAM_FILE  = "params";  // relative to WorkingDirectory
+    constexpr const char* QGC_IP_FILE = "qgc_ip";  // optional override: one IP per line
 
     // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
     namespace Lte {

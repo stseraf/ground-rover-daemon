@@ -74,45 +74,9 @@ fi
 
 # --- Reboot ---
 step "Rebooting modem"
-adb reboot
-echo "Waiting for modem to come back up (up to 90s)..."
-BOOT_TIMEOUT=90
-ELAPSED=0
-while [ $ELAPSED -lt $BOOT_TIMEOUT ]; do
-    sleep 5
-    ELAPSED=$((ELAPSED + 5))
-    BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || echo "")
-    [ "$BOOT" = "1" ] && break
-    echo "  ...${ELAPSED}s elapsed, waiting..."
-done
-[ "$BOOT" = "1" ] || die "Boot not complete after ${BOOT_TIMEOUT}s"
-
-# --- Verify ---
-step "Verifying"
-echo "  [OK] Boot complete (${ELAPSED}s)"
-
-MIFI=$(adb shell pm list packages -d 2>/dev/null | grep mifiservice || echo "")
-[ -n "$MIFI" ] && echo "  [OK] MifiService disabled" || echo "  [WARN] Could not confirm MifiService state"
-
-DNSMASQ=$(adb shell ps 2>/dev/null | grep dnsmasq || echo "")
-[ -z "$DNSMASQ" ] && echo "  [OK] dnsmasq not running (static IP mode)" || echo "  [WARN] dnsmasq still running — stale process?"
-
-LTE_SRV_PID=$(adb shell "cat /data/logs/lte_status_srv.pid 2>/dev/null" | tr -d '\r' || echo "")
-if [ -n "$LTE_SRV_PID" ] && adb shell "kill -0 $LTE_SRV_PID 2>/dev/null" >/dev/null 2>&1; then
-    echo "  [OK] lte_status_srv running (pid=$LTE_SRV_PID)"
-else
-    echo "  [WARN] lte_status_srv not running"
-fi
-
-BR0=$(adb shell ip addr show br0 2>/dev/null | grep "192.168.100.1" || echo "")
-[ -n "$BR0" ] && echo "  [OK] br0 has correct IP" || die "br0 missing or wrong IP"
-
-IP_FWD=$(adb shell cat /proc/sys/net/ipv4/ip_forward 2>/dev/null | tr -d '\r' || echo 0)
-[ "$IP_FWD" = "1" ] && echo "  [OK] IP forwarding enabled" || die "IP forwarding not enabled"
-
-GREEN=$(adb shell cat /sys/class/leds/green/brightness 2>/dev/null | tr -d '\r' || echo 0)
-RED=$(adb shell cat /sys/class/leds/red/brightness 2>/dev/null | tr -d '\r' || echo 255)
-[ "$GREEN" = "255" ] && [ "$RED" = "0" ] && echo "  [OK] LED: green (LTE up)" || echo "  [WARN] LED not green (green=$GREEN red=$RED) — LTE may still be connecting"
-
+# Use timeout: adb reboot hangs when the modem USB disconnects mid-reboot.
+# SSH session may also drop if the Pi routes traffic through the modem — so we
+# exit immediately here. Run 'make verify-modem' once the modem is back up.
+timeout 10 adb reboot || true
 echo ""
-echo "Modem deployment complete."
+echo "Modem rebooting. Run 'make verify-modem' in ~60s to confirm boot."
