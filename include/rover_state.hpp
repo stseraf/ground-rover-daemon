@@ -38,4 +38,9 @@ struct RoverState {
     char    qgc_ip[INET6_ADDRSTRLEN]{};      // extracted from qgc_addr on first packet
     bool    qgc_ip_known    = false;
     uint32_t video_bitrate_bps = 5000000;    // mirrors VIDEO_BITRATE param
+    uint32_t video_fps         = 30;         // mirrors VIDEO_FPS param
+
+    // Stream health monitor / auto-retry state
+    int  gst_retry_count = 0;    // consecutive restart attempts on current mode
+    bool gst_gave_up     = false; // true after exhausting all retries; cleared on next deliberate start
 };

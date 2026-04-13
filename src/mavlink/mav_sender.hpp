@@ -32,6 +32,7 @@ public:
     void send_gps_raw_int(const RoverState& state);
     void send_global_position_int(const RoverState& state);
     void send_cellular_status(const RoverState& state);
+    void send_statustext(const RoverState& state, uint8_t severity, const char* text);
 
     // Camera component messages — all take cam_comp_id (MAV_COMP_ID_CAMERA + i)
     void send_camera_heartbeat(uint8_t cam_comp_id, const RoverState& state);

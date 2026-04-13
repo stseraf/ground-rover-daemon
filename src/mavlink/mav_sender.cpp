@@ -184,7 +184,7 @@ void MavSender::send_video_stream_information(uint8_t cam_comp_id, const RoverSt
     info.count            = static_cast<uint8_t>(cam.modes.size());
     info.type             = VIDEO_STREAM_TYPE_RTPUDP;
     info.flags            = running ? VIDEO_STREAM_STATUS_FLAGS_RUNNING : 0;
-    info.framerate        = mode.fps;
+    info.framerate        = std::min(static_cast<float>(state.video_fps), mode.fps);
     info.resolution_h     = mode.width;
     info.resolution_v     = mode.height;
     info.bitrate          = state.video_bitrate_bps;
@@ -213,7 +213,7 @@ void MavSender::send_video_stream_status(uint8_t cam_comp_id, const RoverState& 
     mavlink_video_stream_status_t status{};
     status.stream_id    = stream_id;
     status.flags        = running ? VIDEO_STREAM_STATUS_FLAGS_RUNNING : 0;
-    status.framerate    = mode.fps;
+    status.framerate    = std::min(static_cast<float>(state.video_fps), mode.fps);
     status.resolution_h = mode.width;
     status.resolution_v = mode.height;
     status.bitrate      = state.video_bitrate_bps;
@@ -367,6 +367,15 @@ void MavSender::send_cellular_status(const RoverState& state)
     cs.failure_reason = 0;
 
     mavlink_msg_cellular_status_encode(sys_id_, comp_id_, &msg, &cs);
+    send(msg, state);
+}
+
+void MavSender::send_statustext(const RoverState& state, uint8_t severity, const char* text)
+{
+    mavlink_message_t msg;
+    char buf[50]{};
+    std::strncpy(buf, text, sizeof(buf) - 1);
+    mavlink_msg_statustext_pack(sys_id_, comp_id_, &msg, severity, buf, 0, 0);
     send(msg, state);
 }
 

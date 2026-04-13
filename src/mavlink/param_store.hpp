@@ -9,7 +9,7 @@ struct Param {
 
 class ParamStore {
 public:
-    static constexpr uint16_t COUNT = 6;
+    static constexpr uint16_t COUNT = 7;
 
     ParamStore();  // init from Config defaults, then load file
 

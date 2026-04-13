@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Waddress-of-packed-member"
 #include "common/mavlink.h"
@@ -20,3 +22,7 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
 void handle_camera_command_long(MavSender& mav, RoverState& state,
                                 const mavlink_command_long_t* cmd,
                                 int cam_idx);
+
+// Periodic liveness check — call every Config::GST_MONITOR_INTERVAL_US from the main loop.
+// Checks whether active_gst_pid is still alive and applies the retry/fallback policy on death.
+void gst_monitor_tick(MavSender& mav, RoverState& state, uint64_t now);

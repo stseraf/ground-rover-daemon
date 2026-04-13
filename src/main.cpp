@@ -96,6 +96,7 @@ int main()
     // Camera discovery — runs libcamera-hello --list-cameras at startup
     state.cameras = discover_cameras();
     state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
+    state.video_fps         = static_cast<uint32_t>(params.get(6));
 
     // Optional QGC IP override (useful when modem NATs all traffic through gateway)
     {
@@ -115,6 +116,7 @@ int main()
     uint64_t last_mc_us        = 0;
     uint64_t last_hb           = 0;
     uint64_t last_lte_poll     = 0;
+    uint64_t last_gst_monitor  = 0;
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
@@ -297,6 +299,9 @@ int main()
                                 if (std::strncmp(params.name(idx), "VIDEO_BITRATE", 16) == 0)
                                     state.video_bitrate_bps =
                                         static_cast<uint32_t>(params.get(idx));
+                                if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0)
+                                    state.video_fps =
+                                        static_cast<uint32_t>(params.get(idx));
                                 logger::line("rx: PARAM_SET(23): %s=%.4f saved", params.name(idx), ps.param_value);
                             } else {
                                 logger::line("rx: PARAM_SET(23): unknown param %.16s", ps.param_id);
@@ -385,6 +390,11 @@ int main()
                            clamp_axis(static_cast<int32_t>(smoothed.right) - trim));
             }
             state.lte_was_connected = state.lte.connected;
+        }
+
+        if (now - last_gst_monitor > Config::GST_MONITOR_INTERVAL_US) {
+            last_gst_monitor = now;
+            gst_monitor_tick(mav, state, now);
         }
 
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
