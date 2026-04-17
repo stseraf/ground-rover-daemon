@@ -23,6 +23,13 @@ else
     echo "  [WARN] lte_status_srv not running"
 fi
 
+SWITCH_SRV_PID=$(adb shell "cat /data/logs/link_switch_srv.pid 2>/dev/null" | tr -d '\r' || echo "")
+if [ -n "$SWITCH_SRV_PID" ] && adb shell "kill -0 $SWITCH_SRV_PID 2>/dev/null" >/dev/null 2>&1; then
+    echo "  [OK] link_switch_srv running (pid=$SWITCH_SRV_PID)"
+else
+    echo "  [WARN] link_switch_srv not running (nat_forward.sh may still be initializing WiFi)"
+fi
+
 BR0=$(adb shell ip addr show br0 2>/dev/null | grep "192.168.100.1" || echo "")
 [ -n "$BR0" ] && echo "  [OK] br0 has correct IP" || die "br0 missing or wrong IP"
 
@@ -42,7 +49,17 @@ case "$DEFAULT_DEV" in
 esac
 echo "  [OK] Active uplink: $UPLINK"
 
-# Firewall rules — depend on active uplink
+# Firewall rules — depend on active uplink.
+# nat_forward.sh applies iptables only after WiFi association (can take 30-90s).
+# Wait until link_switch_srv is up (it's the last thing nat_forward.sh launches).
+echo "  Waiting for nat_forward.sh to finish (up to 90s)..."
+WAIT=0
+while [ $WAIT -lt 90 ]; do
+    SW_PID=$(adb shell "cat /data/logs/link_switch_srv.pid 2>/dev/null" | tr -d '\r' || echo "")
+    [ -n "$SW_PID" ] && adb shell "kill -0 $SW_PID 2>/dev/null" >/dev/null 2>&1 && break
+    sleep 5; WAIT=$((WAIT + 5))
+    [ $((WAIT % 10)) -eq 0 ] && echo "  ...${WAIT}s elapsed, waiting..."
+done
 NAT=$(adb shell iptables -t nat -L natctrl_nat_POSTROUTING -n -v 2>/dev/null | tr -d '\r')
 FWD=$(adb shell iptables -L natctrl_FORWARD -n -v 2>/dev/null | tr -d '\r')
 

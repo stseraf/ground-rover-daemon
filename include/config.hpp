@@ -62,6 +62,7 @@ namespace Config {
         constexpr uint64_t    POLL_INTERVAL_US = 5'000'000ULL; // 5 s
         constexpr const char* STATUS_HOST      = "192.168.100.1";
         constexpr uint16_t    STATUS_PORT      = 8080;         // lte_status_srv.sh TCP port
+        constexpr uint16_t    SWITCH_PORT      = 8081;         // link_switch_srv.sh TCP port
         constexpr const char* IFACE_FLAGS_PATH = "/sys/class/net/usb0/flags";
         constexpr const char* PROC_NET_DEV     = "/proc/net/dev";
     }

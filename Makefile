@@ -55,6 +55,7 @@ endif
 
 ifeq ($(LTE),usb)
   SRCS += src/lte/usb_lte_monitor.cpp
+  SRCS += src/lte/link_switcher.cpp
 endif
 
 HEADERS = $(wildcard include/*.hpp) \
@@ -97,7 +98,8 @@ deploy-modem: _deploy-modem-push verify-modem
 _deploy-modem-push:
 	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
 	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh \
-	    deploy/modem/lte_status_srv.sh deploy/modem/deploy-modem.sh \
+	    deploy/modem/lte_status_srv.sh deploy/modem/link_switch_srv.sh \
+	    deploy/modem/deploy-modem.sh \
 	    deploy/modem/verify-modem.sh \
 	    $(RPI):/tmp/modem-deploy/
 	ssh -o ServerAliveInterval=3 -o ServerAliveCountMax=1 $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh" 2>/dev/null; \

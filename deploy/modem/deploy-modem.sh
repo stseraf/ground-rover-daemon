@@ -57,6 +57,10 @@ step "Pushing lte_status_srv.sh"
 adb push "$SCRIPT_DIR/lte_status_srv.sh" /system/etc/lte_status_srv.sh
 adb shell chmod 755 /system/etc/lte_status_srv.sh
 
+step "Pushing link_switch_srv.sh"
+adb push "$SCRIPT_DIR/link_switch_srv.sh" /system/etc/link_switch_srv.sh
+adb shell chmod 755 /system/etc/link_switch_srv.sh
+
 # --- Hook into boot ---
 step "Hooking nat_forward.sh into init.qcom.post_boot.sh"
 HOOK_MARKER="nat_forward.sh"
