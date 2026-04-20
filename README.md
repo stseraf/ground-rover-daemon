@@ -99,6 +99,15 @@ Features in the backlog, not yet implemented.
 - Failsafe: all channels centred if ELRS also drops
 - `RC_CHANNELS` telemetry forwarded to QGC
 
+### INA219 current / voltage sensor (battery monitoring)
+
+**Scope:**
+- Read voltage and current from INA219 over I2C (addr `0x40`, same bus as gimbal)
+- Forward as MAVLink `BATTERY_STATUS` (msg 147) — QGC displays voltage, current, and estimated charge level in the HUD
+- Parameters: shunt resistance, cell count, warn / critical voltage thresholds
+- Edge log + QGC `STATUSTEXT` on low-voltage warning and battery-critical events
+- Build variant: `make BATTERY=ina219`; stub (`make BATTERY=stub`) keeps behaviour unchanged when sensor is absent
+
 ### Autopilot modes
 
 Depends on features 1 and 4 (both done). Not started.
