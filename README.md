@@ -64,6 +64,7 @@ Fresh Pi to ready-to-drive rover in seven steps. Start from [doc/setup/01-raspbe
 | 7 | Autopilot modes (HOLD, RETURN) | 🗓 planned | see *Improvement plan* |
 | 8 | INA219 battery voltage + current monitoring | 🗓 planned | see *Improvement plan* |
 | 9 | LuckFox Pico Mini + SC3336 (alt hardware) | 🔬 under evaluation | see *Improvement plan* |
+| 10 | Custom ground station (alt / from-scratch) | 🔬 under evaluation | see *Improvement plan* |
 
 ---
 
@@ -104,6 +105,29 @@ The LuckFox Pico Mini (RV1103, Cortex-A7 + RISC-V, 64 MB DDR2) is a candidate re
 - `ARCH=luckfox` cross-compile target (`arm-linux-gnueabihf-g++`)
 - `CAMERA=rkmpp` build variant with an MPP-backed `gst_pipeline` implementation
 - Hardware bring-up notes in `doc/setup/` covering flashing, USB OTG mode, pin mapping
+
+### Custom ground station (evaluate alternatives or build from scratch)
+
+QGC is a mature and well-supported ground station but was designed around ArduPilot/PX4 workflows. Several rover-specific features require workarounds or are simply not exposed in the QGC UI.
+
+**Known QGC gaps for this rover:**
+- Stream selection panel exists but is limited — resolution can be switched via stream list, but bitrate and FPS cannot be changed from the UI (require MAVLink parameter panel)
+- No LTE/WiFi connectivity panel — uplink state, signal strength, and session traffic are visible only as STATUSTEXT toasts, not as persistent HUD elements
+- `MAV_AUTOPILOT_GENERIC` is not recognised by the mode switcher — HOLD/RETURN modes have no dedicated UI control; switching requires workarounds
+- STATUSTEXT log is ephemeral — notifications (GPS fix, stream start, LTE warning) disappear and are not scrollable in the standard view
+- No battery cell-level display for custom `BATTERY_STATUS` sources
+
+**Evaluation goals — open-source alternatives:**
+- [Mission Planner](https://ardupilot.org/planner/) — Windows-centric, plugin-friendly, but heavy
+- [MAVProxy](https://ardupilot.org/mavproxy/) — CLI-based, scriptable; good for testing, poor as a daily driver
+- [MAVSDK](https://mavsdk.mavlink.io/) — SDK, not a UI, but useful for building a custom app
+- [Cockpit](https://github.com/bluerobotics/cockpit) — web-based, BlueRobotics origin, extensible widget system; most promising candidate for a custom rover panel
+- Evaluate widget extensibility, MAVLink passthrough fidelity, and mobile/desktop support
+
+**If evaluation favours a custom implementation:**
+- Web app (React / Vue) talking MAVLink over WebSocket (use `mavlink-router` or similar bridge on the Pi)
+- Widgets: video stream selector with bitrate/FPS controls (from `VIDEO_STREAM_INFORMATION`), LTE/WiFi status panel (parses `RADIO_STATUS` + session STATUSTEXT), mode switcher for `SET_MODE`, persistent STATUSTEXT log, battery HUD from `BATTERY_STATUS`
+- Configurable layout, mobile-friendly (phone as ground station over WireGuard)
 
 ### ELRS RX (radio failsafe)
 
