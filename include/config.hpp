@@ -7,7 +7,9 @@ namespace Config {
     constexpr uint8_t  MAV_COMP_ID = 1;
 
     constexpr uint16_t UDP_BIND_PORT         = 14550;
-    constexpr uint64_t HEARTBEAT_INTERVAL_US = 1'000'000;
+    constexpr uint64_t HEARTBEAT_INTERVAL_US  = 1'000'000;
+    constexpr uint64_t GST_MONITOR_INTERVAL_US = 3'000'000;  // 3 s
+    constexpr uint64_t QGC_RECONNECT_GAP_US  = 5'000'000;    // 5 s silence → treat next packet as reconnect
     constexpr uint64_t LOOP_SLEEP_US         = 1'000;
 
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
@@ -45,6 +47,25 @@ namespace Config {
         constexpr const char* I2C_BUS  = "/dev/i2c-1";
         constexpr uint8_t     I2C_ADDR = 0x10;
         constexpr int16_t     DEAD_ZONE = 30;
+    }
+
+    // GPS module (GY-GPS6MV2 / u-blox NEO-6M, NMEA 0183 over UART)
+    namespace Gps {
+        constexpr const char* UART_DEV  = "/dev/serial0";
+        constexpr int         BAUD_RATE = 9600;
+    }
+
+    constexpr const char* PARAM_FILE  = "params";  // relative to WorkingDirectory
+    constexpr const char* QGC_IP_FILE = "qgc_ip";  // optional override: one IP per line
+
+    // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
+    namespace Lte {
+        constexpr uint64_t    POLL_INTERVAL_US = 5'000'000ULL; // 5 s
+        constexpr const char* STATUS_HOST      = "192.168.100.1";
+        constexpr uint16_t    STATUS_PORT      = 8080;         // lte_status_srv.sh TCP port
+        constexpr uint16_t    SWITCH_PORT      = 8081;         // link_switch_srv.sh TCP port
+        constexpr const char* IFACE_FLAGS_PATH = "/sys/class/net/usb0/flags";
+        constexpr const char* PROC_NET_DEV     = "/proc/net/dev";
     }
 
     // Stub telemetry values

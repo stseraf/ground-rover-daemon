@@ -1,0 +1,15 @@
+[Unit]
+Description=Ground Rover MAVLink Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/ground-rover-daemon/
+ExecStart=/home/pi/ground-rover-daemon/ground_rover_daemon
+Restart=on-failure
+RestartSec=5s
+SupplementaryGroups=gpio i2c dialout
+
+[Install]
+WantedBy=multi-user.target
