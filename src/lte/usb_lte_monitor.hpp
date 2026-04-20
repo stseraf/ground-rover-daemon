@@ -18,4 +18,5 @@ private:
     bool fetch_traffic();
 
     LteStatus status_{};
+    bool      was_signal_low_ = false; // edge-detect low-signal warnings on active uplink
 };

@@ -177,11 +177,9 @@ bool UsbLteMonitor::fetch_traffic()
 
 void UsbLteMonitor::update()
 {
-    bool    was_present      = status_.present;
-    bool    was_connected    = status_.connected;
-    uint8_t prev_rssi        = status_.rssi;
-    int8_t  prev_wifi_rssi   = status_.wifi_rssi_dbm;
-    char    prev_uplink[8];
+    bool was_present   = status_.present;
+    bool was_connected = status_.connected;
+    char prev_uplink[8];
     ::strncpy(prev_uplink, status_.uplink, sizeof(prev_uplink));
 
     status_.present = check_interface();
@@ -231,12 +229,35 @@ void UsbLteMonitor::update()
             logger::line("[lte] disconnected");
     } else if (status_.connected) {
         bool uplink_changed = ::strcmp(status_.uplink, prev_uplink) != 0;
-        if (uplink_changed)
+        if (uplink_changed) {
             logger::line("[lte] uplink %s→%s",
                          prev_uplink[0] ? prev_uplink : "unknown", uplink_str);
-        if (status_.rssi != prev_rssi || status_.wifi_rssi_dbm != prev_wifi_rssi)
-            logger::line("[lte] rssi=%u→%u wifi_rssi=%d→%d",
-                         prev_rssi, status_.rssi,
-                         prev_wifi_rssi, status_.wifi_rssi_dbm);
+            was_signal_low_ = false; // re-evaluate threshold against new uplink
+        }
+
+        // Warn only on the active uplink and only when the signal is really
+        // low (edge-triggered). LTE CSQ of 0 and WiFi 0 dBm are sentinels
+        // for "unknown" — exclude from the check.
+        bool is_lte  = ::strncmp(status_.uplink, "lte",  3) == 0;
+        bool is_wifi = ::strncmp(status_.uplink, "wifi", 4) == 0;
+        bool signal_low = false;
+        if (is_lte  && status_.rssi > 0 && status_.rssi < 10)
+            signal_low = true;
+        if (is_wifi && status_.wifi_rssi_dbm < 0 && status_.wifi_rssi_dbm < -75)
+            signal_low = true;
+
+        if (signal_low != was_signal_low_) {
+            if (signal_low) {
+                if (is_lte)
+                    logger::line("[lte] low LTE signal: rssi=%u (CSQ, warn < 10)",
+                                 status_.rssi);
+                else
+                    logger::line("[lte] low WiFi signal: %d dBm (warn < -75)",
+                                 status_.wifi_rssi_dbm);
+            } else {
+                logger::line("[lte] signal recovered on %s", uplink_str);
+            }
+            was_signal_low_ = signal_low;
+        }
     }
 }

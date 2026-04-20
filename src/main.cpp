@@ -54,6 +54,18 @@ static uint64_t micros()
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
 }
 
+static void stop_stream(RoverState& state)
+{
+    if (state.active_gst_pid <= 0) return;
+    gst_kill(state.active_gst_pid);
+    state.active_gst_pid  = -1;
+    state.active_cam_idx  = -1;
+    state.active_mode_idx = -1;
+    state.gst_retry_count = 0;
+    state.gst_gave_up     = false;
+    logger::line("[gst] stream stopped");
+}
+
 static void autostart_stream(RoverState& state)
 {
     if (state.cameras.empty() || state.cameras[0].modes.empty()) return;
@@ -92,6 +104,7 @@ int main()
 #endif
         logger::line("MAVLink rover daemon started at %lds%03ldms since boot",
                      ts.tv_sec, ts.tv_nsec / 1000000);
+        logger::line("[build] %s@%s", GIT_BRANCH, GIT_SHA);
     }
 
 #ifdef DRIVER_TB6612
@@ -149,25 +162,47 @@ int main()
     bool     banner_sent       = false; // one-shot per QGC session: STATUSTEXT banner
     bool     prev_gps_valid    = false; // edge-detect GPS fix acquired/lost
     uint64_t last_qgc_packet_us = 0;    // for reconnect detection (silence > QGC_RECONNECT_GAP_US)
+    // LTE-only traffic accounting for the current daemon session.
+    // usb0 /proc counters persist across daemon restarts and reset to 0 when
+    // usb0 disappears, so we track deltas between polls and gate accumulation
+    // on uplink == "lte" (WiFi uplink bytes are not billed).
+    // Emission threshold (LTE_LOG_STEP_MB param) is applied to the current
+    // session totals vs the totals at last emission, so changing the step
+    // mid-session doesn't strand the counter on a stale boundary.
+    uint64_t lte_session_rx_bytes = 0;
+    uint64_t lte_session_tx_bytes = 0;
+    uint64_t lte_last_rx_bytes    = 0;
+    uint64_t lte_last_tx_bytes    = 0;
+    uint64_t lte_rx_emitted_bytes = 0; // lte_session_rx_bytes at last emission
+    uint64_t lte_tx_emitted_bytes = 0;
+    bool     lte_baseline_set     = false;
     mavlink_message_t msg;
     mavlink_status_t  status;
 
     while (running) {
+        // Detect QGC silence. state.qgc_known flips false once we cross the
+        // threshold; next incoming packet treats the revival as a reconnect.
+        if (state.qgc_known && last_qgc_packet_us != 0 &&
+            (micros() - last_qgc_packet_us) > Config::QGC_RECONNECT_GAP_US) {
+            logger::line("[qgc] losing qgc (no packets for %llu s)",
+                         static_cast<unsigned long long>(
+                             (micros() - last_qgc_packet_us) / 1'000'000ULL));
+            state.qgc_known = false;
+            stop_stream(state);
+        }
+
         uint8_t receive_buffer[2048];
         ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
                               state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
-            uint64_t now_us = micros();
-            if (last_qgc_packet_us != 0 &&
-                (now_us - last_qgc_packet_us) > Config::QGC_RECONNECT_GAP_US) {
-                logger::line("[qgc] reconnect detected (gap %llu ms) — re-arming status messages",
-                             static_cast<unsigned long long>(
-                                 (now_us - last_qgc_packet_us) / 1000));
+            if (!state.qgc_known && last_qgc_packet_us != 0) {
+                logger::line("[qgc] reconnected — re-arming status messages");
                 banner_sent    = false;
                 prev_gps_valid = false;
                 prev_uplink[0] = '\0';
+                autostart_stream(state);
             }
-            last_qgc_packet_us = now_us;
+            last_qgc_packet_us = micros();
             state.qgc_known = true;
             if (!state.qgc_ip_known) {
                 inet_ntop(AF_INET, &state.qgc_addr.sin_addr,
@@ -415,6 +450,46 @@ int main()
             lte.update();
             state.lte    = lte.status();
             last_lte_poll = now;
+
+            // Accumulate usb0 bytes only while LTE is the active uplink.
+            // Baseline is invalidated on usb0 disappearance so the kernel's
+            // fresh counters on re-attach don't show up as a huge delta.
+            bool lte_uplink_active = state.lte.connected &&
+                                     ::strncmp(state.lte.uplink, "lte", 3) == 0;
+            if (state.lte.present) {
+                if (lte_baseline_set && lte_uplink_active) {
+                    if (state.lte.rx_bytes >= lte_last_rx_bytes)
+                        lte_session_rx_bytes += state.lte.rx_bytes - lte_last_rx_bytes;
+                    if (state.lte.tx_bytes >= lte_last_tx_bytes)
+                        lte_session_tx_bytes += state.lte.tx_bytes - lte_last_tx_bytes;
+                }
+                lte_last_rx_bytes = state.lte.rx_bytes;
+                lte_last_tx_bytes = state.lte.tx_bytes;
+                lte_baseline_set  = true;
+            } else {
+                lte_baseline_set = false;
+            }
+
+            int step_mb = static_cast<int>(params.get(8));
+            if (step_mb > 0) {
+                uint64_t step_bytes =
+                    static_cast<uint64_t>(step_mb) * 1000ULL * 1000ULL;
+                if (lte_session_rx_bytes / step_bytes >
+                        lte_rx_emitted_bytes / step_bytes ||
+                    lte_session_tx_bytes / step_bytes >
+                        lte_tx_emitted_bytes / step_bytes) {
+                    char msg[64];
+                    std::snprintf(msg, sizeof(msg),
+                                  "LTE session: rx %.1f MB tx %.1f MB",
+                                  lte_session_rx_bytes / 1e6,
+                                  lte_session_tx_bytes / 1e6);
+                    logger::line("[lte] %s", msg);
+                    if (state.qgc_known)
+                        mav.send_statustext(state, MAV_SEVERITY_INFO, msg);
+                    lte_rx_emitted_bytes = lte_session_rx_bytes;
+                    lte_tx_emitted_bytes = lte_session_tx_bytes;
+                }
+            }
 
             // Skip transient "unknown" during a switch (routes/iptables mid-swap)
             // to avoid spurious duplicate LTE notifications.

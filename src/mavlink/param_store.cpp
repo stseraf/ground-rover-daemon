@@ -18,6 +18,7 @@ ParamStore::ParamStore()
     params_[5] = {"VIDEO_BITRATE",   5000000.0f};
     params_[6] = {"VIDEO_FPS",       30.0f};
     params_[7] = {"NET_LINK_PREF",   0.0f};  // 0=auto, 1=WiFi-prefer, 2=LTE-force
+    params_[8] = {"NET_LOG_STEP_MB", 10.0f}; // 0=disabled; MB between session-traffic logs
     load(Config::PARAM_FILE);
 }
 
