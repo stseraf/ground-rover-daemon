@@ -3,13 +3,13 @@
 A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and controlled from [QGroundControl](https://qgroundcontrol.com/) over LTE. The daemon is the MAVLink bridge between QGC and the hardware: joystick in, motor PWM + gimbal servos out, GPS + radio telemetry back.
 
 ```
-  ┌─── QGC (operator PC, home LAN) ──┐
+  ┌─── QGC (operator PC) ────────────┐
   │  joystick · video · parameters   │
   └──────────────┬───────────────────┘
                  │ MAVLink UDP + H.264 RTP
                  ▼
-  ┌─── Home router (WireGuard peer) ─┐
-  │  back-to-home VPN endpoint       │
+  ┌─── Router (WireGuard peer) ──────┐
+  │  VPN endpoint                    │
   └──────────────┬───────────────────┘
                  │ encrypted UDP over Internet
                  ▼
