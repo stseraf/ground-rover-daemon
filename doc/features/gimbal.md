@@ -6,6 +6,8 @@ Build variant: `make GIMBAL=i2c`.
 
 Implementation: [`src/gimbal/i2c_gimbal_controller.cpp`](../../src/gimbal/i2c_gimbal_controller.cpp).
 
+> **Status: designed and implemented, not yet hardware-tested.** The physical gimbal (Arduino + servos + mount) is descoped for now. The Pi-side code, build variant, and I2C protocol are in place and ready — once the Arduino slave and servos are built, bring-up should be the firmware-verification step in §Verification below.
+
 ---
 
 ## Signal flow

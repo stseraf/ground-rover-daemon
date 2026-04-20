@@ -1,6 +1,6 @@
 # Ground Rover Daemon
 
-A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and controlled from [QGroundControl](https://qgroundcontrol.com/) over LTE. The daemon is the MAVLink bridge between QGC and the hardware: joystick in, motor PWM + gimbal servos out, GPS + radio telemetry back.
+A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and controlled from [QGroundControl](https://qgroundcontrol.com/) over LTE. The daemon is the MAVLink bridge between QGC and the hardware: joystick in, motor PWM out, GPS + radio telemetry back, H.264 video to QGC.
 
 ```
   ┌─── QGC (operator PC) ────────────┐
@@ -22,10 +22,12 @@ A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and 
   ┌─── Raspberry Pi Zero 2W ─────────┐
   │  ground_rover_daemon             │
   │   ├─ TB6612 motor driver         │
-  │   ├─ I2C gimbal (Arduino)        │
+  │   ├─ I2C gimbal (Arduino) *      │
   │   ├─ NMEA GPS (NEO-6M)           │
   │   └─ GStreamer H.264 (MIPI cam)  │
   └──────────────────────────────────┘
+
+  * designed and implemented, not yet hardware-tested
 ```
 
 ---
@@ -51,7 +53,8 @@ Fresh Pi to ready-to-drive rover in six steps. Start from [doc/setup/01-raspberr
 
 | # | Feature | Status | Doc |
 |---|---|---|---|
-| 1 | Differential drive (TB6612) + I2C gimbal | ✅ done | [drive.md](doc/features/drive.md), [gimbal.md](doc/features/gimbal.md) |
+| 1 | Differential drive (TB6612) | ✅ done | [drive.md](doc/features/drive.md) |
+| 1a | I2C gimbal (Arduino + servos) | 🧪 implemented, not yet hardware-tested (gimbal build descoped) | [gimbal.md](doc/features/gimbal.md) |
 | 2 | MAVLink parameter protocol + persistence | ✅ done | [parameters.md](doc/reference/parameters.md) |
 | 3 | ELRS RX (radio failsafe) | ⏸ blocked (UART in use) | see *Improvement plan* |
 | 4 | GPS module + MAVLink telemetry | ✅ done | [gps.md](doc/features/gps.md) |

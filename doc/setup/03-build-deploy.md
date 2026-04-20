@@ -29,7 +29,7 @@ Five independent `make` variables control the build:
 |---|---|---|---|
 | `ARCH` | `host`, `rpi` | `host` | `rpi` cross-compiles for aarch64 |
 | `DRIVER` | `stub`, `tb6612` | `stub` | Motor driver backend |
-| `GIMBAL` | `stub`, `i2c` | `stub` | Gimbal controller backend |
+| `GIMBAL` | `stub`, `i2c` | `stub` | Gimbal controller backend (`i2c` implemented but not yet hardware-tested) |
 | `GPS` | `stub`, `nmea` | `stub` | GPS backend |
 | `LTE` | `stub`, `usb` | `stub` | LTE modem monitoring + link switching |
 
@@ -40,11 +40,13 @@ make
 ./build/ground_rover_daemon
 ```
 
-The full rover build (selected automatically by `make deploy`):
+The default rover build (used by `make deploy`) enables motors, GPS, and LTE — the gimbal stays on the stub:
 
 ```bash
-make rebuild ARCH=rpi DRIVER=tb6612 GIMBAL=i2c GPS=nmea LTE=usb
+make rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea LTE=usb
 ```
+
+Add `GIMBAL=i2c` only when the optional gimbal hardware is present (implemented but not yet hardware-tested — see [features/gimbal.md](../features/gimbal.md)).
 
 ---
 

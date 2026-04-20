@@ -40,7 +40,9 @@ The NEO-6M logic is 3.3 V — no level shifter needed.
 
 ---
 
-## 2.3 I2C gimbal (Arduino slave)
+## 2.3 I2C gimbal (Arduino slave) — optional, not hardware-tested
+
+> **Optional.** The gimbal is designed and the Pi-side code is in place, but the physical build (Arduino + servos + mount) is currently descoped and has not been tested end-to-end. Skip this section if you aren't building the gimbal — the daemon runs fine without it (builds with `GIMBAL=stub`, or with `GIMBAL=i2c` and silently disables if no slave responds on the bus).
 
 The gimbal is an Arduino Nano/Uno acting as an I2C slave controlling two servos. The Pi is the I2C master.
 
