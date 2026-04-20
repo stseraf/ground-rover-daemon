@@ -63,6 +63,7 @@ Fresh Pi to ready-to-drive rover in seven steps. Start from [doc/setup/01-raspbe
 | 6 | Video streaming (GStreamer + H.264 RTP) | ✅ done | [video.md](doc/features/video.md) |
 | 7 | Autopilot modes (HOLD, RETURN) | 🗓 planned | see *Improvement plan* |
 | 8 | INA219 battery voltage + current monitoring | 🗓 planned | see *Improvement plan* |
+| 9 | LuckFox Pico Mini + SC3336 (alt hardware) | 🔬 under evaluation | see *Improvement plan* |
 
 ---
 
@@ -88,6 +89,21 @@ Fresh Pi to ready-to-drive rover in seven steps. Start from [doc/setup/01-raspbe
 ## Improvement plan
 
 Features in the backlog, not yet implemented.
+
+### LuckFox Pico Mini + SC3336 camera (alternative hardware platform)
+
+The LuckFox Pico Mini (RV1103, Cortex-A7 + RISC-V, 64 MB DDR2) is a candidate replacement or parallel target for the Pi Zero 2W — smaller form factor, built-in VPU for hardware H.264, native MIPI CSI for the SC3336 (3 MP, 2304 × 1296).
+
+**Evaluation goals:**
+- Build toolchain: confirm the daemon compiles for `arm-linux-gnueabihf` (RV1103 runs 32-bit ARMv7 Linux); add `ARCH=luckfox` target to Makefile
+- Camera pipeline: `libcamera` is not available on LuckFox — evaluate `rkmpp` (Rockchip MPP) or V4L2 + `v4l2h264enc` as a drop-in replacement for the GStreamer source element
+- GPIO / I2C / UART: verify pin availability for TB6612 PWM, gimbal I2C, GPS UART, and INA219 I2C on the 26-pin header
+- USB: check if the UZ801 modem enumerates as `usb0` (RNDIS) under the LuckFox kernel
+
+**If evaluation passes — implementation scope:**
+- `ARCH=luckfox` cross-compile target (`arm-linux-gnueabihf-g++`)
+- `CAMERA=rkmpp` build variant with an MPP-backed `gst_pipeline` implementation
+- Hardware bring-up notes in `doc/setup/` covering flashing, USB OTG mode, pin mapping
 
 ### ELRS RX (radio failsafe)
 
