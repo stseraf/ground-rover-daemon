@@ -18,6 +18,7 @@ Source: [`src/mavlink/param_store.cpp`](../../src/mavlink/param_store.cpp).
 | 5 | `VIDEO_BITRATE` | int | 5 000 000 | **5 000 000** | 25 000–25 000 000 | H.264 encoder target bitrate (bps). 5 Mbps is a good balance for LTE — raise for local WiFi, lower if the stream stutters on LTE. |
 | 6 | `VIDEO_FPS` | int | 30 | **30** | 1–60 | Frame rate cap. Capped further by the sensor mode's physical limit; 1296×972 mode tops out at ~46 fps. |
 | 7 | `NET_LINK_PREF` | enum | 0 | **1** | 0/1/2 | 0 = auto (keep current uplink), 1 = prefer WiFi (switch to home WiFi when available), 2 = force LTE. Set to 1 when home WiFi is provisioned — the modem falls back to LTE automatically if WiFi drops. |
+| 8 | `NET_LOG_STEP_MB` | int | 10 | **10** | 0–10 000 | Step size (MB) for LTE session traffic logs. Every time cumulative LTE-only RX **or** TX crosses another multiple of this value, the daemon logs `LTE session: rx X.X MB tx Y.Y MB` to stdout and sends it as QGC `STATUSTEXT`. Set to `0` to disable. Counts only while uplink is LTE (WiFi bytes are not included); resets on daemon restart. |
 
 All parameters are `MAV_PARAM_TYPE_REAL32` on the wire; the daemon rounds to int where appropriate internally. The `params` file may store floats in scientific notation (e.g., `VIDEO_BITRATE=5e+06`) — this is equivalent to `5000000` and handled correctly.
 
@@ -36,6 +37,7 @@ GPS_RAW_LOG=0
 VIDEO_BITRATE=5e+06
 VIDEO_FPS=30
 NET_LINK_PREF=1
+NET_LOG_STEP_MB=10
 ```
 
 When QGC sends `PARAM_SET`, the daemon writes the file back atomically. Missing keys fall back to compile-time defaults.
@@ -55,7 +57,7 @@ sudo systemctl start ground-rover-daemon
 - `DRIVE_*` + `CTRL_TIMEOUT_MS` → [../features/drive.md](../features/drive.md)
 - `GPS_RAW_LOG` → [../features/gps.md](../features/gps.md)
 - `VIDEO_*` → [../features/video.md](../features/video.md)
-- `NET_LINK_PREF` → [../features/lte-uplink.md](../features/lte-uplink.md)
+- `NET_LINK_PREF`, `NET_LOG_STEP_MB` → [../features/lte-uplink.md](../features/lte-uplink.md)
 
 ---
 

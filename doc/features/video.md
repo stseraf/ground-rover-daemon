@@ -57,6 +57,22 @@ Change live from QGC; the running pipeline is restarted with the new setting.
 
 ---
 
+## Autostart and QGC-loss behaviour
+
+The stream lifecycle is tied to QGC connection state:
+
+| Event | Action |
+|---|---|
+| QGC IP first becomes known (boot or first packet) | Stream autostarts at lowest resolution (stream 1 / cam 0 / mode 0 — 640 × 480) |
+| QGC silent for > 5 s (`QGC_RECONNECT_GAP_US`) | Stream stops (`[gst] stream stopped`) to save LTE bandwidth |
+| QGC reconnects (next packet after silence) | Stream restarts at lowest resolution; banner + autostart `STATUSTEXT` re-sent |
+| User starts a specific stream from QGC | Selected resolution overrides autostart |
+| `RESET_CAMERA_SETTINGS` (QGC "Reset camera defaults" button) | Stops the running stream (does **not** restart) |
+
+The lowest resolution (640 × 480) is chosen for autostart because it is the cheapest mode on LTE and a safe default; the operator can switch to a higher mode from QGC once connected.
+
+---
+
 ## QGC IP detection and the `qgc_ip` file
 
 The GStreamer pipeline sends H.264 RTP to `udp://<QGC-IP>:5600`. The daemon learns the QGC IP from the source address of the first MAVLink packet it receives. Through WireGuard this is normally QGC's LAN IP, which is correct.
