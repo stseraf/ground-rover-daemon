@@ -62,6 +62,7 @@ Fresh Pi to ready-to-drive rover in seven steps. Start from [doc/setup/01-raspbe
 | 5 | LTE link monitoring + uplink switching | ✅ done | [lte-uplink.md](doc/features/lte-uplink.md) |
 | 6 | Video streaming (GStreamer + H.264 RTP) | ✅ done | [video.md](doc/features/video.md) |
 | 7 | Autopilot modes (HOLD, RETURN) | 🗓 planned | see *Improvement plan* |
+| 8 | INA219 battery voltage + current monitoring | 🗓 planned | see *Improvement plan* |
 
 ---
 
