@@ -64,11 +64,19 @@ The GStreamer pipeline sends H.264 RTP to `udp://<QGC-IP>:5600`. The daemon lear
 If video never starts but MAVLink is connected, the IP detection may have misfired (e.g., the first packet came from a different source). Override with the `qgc_ip` file:
 
 ```bash
-echo "192.168.50.100" > /home/pi/ground-rover-daemon/qgc_ip
+echo "192.168.50.46" > /home/pi/ground-rover-daemon/qgc_ip
 sudo systemctl restart ground-rover-daemon
 ```
 
-The file is read once at daemon startup. Remove it to revert to auto-detection.
+Use the **local LAN IP of the QGC machine** (not its WireGuard IP) — the Pi routes home-LAN traffic through the WireGuard tunnel, so `udpsink` can reach it. How to find it:
+
+| OS | Command |
+|---|---|
+| macOS | `System Settings → Network` or `ifconfig \| grep "inet "` in Terminal |
+| Linux | `ip addr show` or `hostname -I` |
+| Windows | `ipconfig` in cmd |
+
+The file holds one IP with no port. It is read once at daemon startup. Remove it to revert to auto-detection.
 
 ---
 

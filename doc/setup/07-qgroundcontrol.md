@@ -67,15 +67,17 @@ Each camera detected via `libcamera-hello --list-cameras` is advertised as a sep
 
 When you select a stream, QGC sends `MAV_CMD_VIDEO_START_STREAMING`; the daemon spawns a GStreamer pipeline that delivers H.264 RTP to QGC's IP on port **5600**.
 
-The daemon learns QGC's IP from the source address of the first MAVLink packet it receives. Through WireGuard this is QGC's LAN IP (e.g., `192.168.50.100`), which is correct. If video never starts but MAVLink works, the IP detection may have misfired — override it:
+The GStreamer pipeline sends H.264 RTP to the QGC machine's IP on port 5600. The daemon normally learns this IP from the first MAVLink packet, but in practice it is more reliable to set it explicitly in the `qgc_ip` file:
 
 ```bash
 # on the Pi, in /home/pi/ground-rover-daemon/
-echo "192.168.50.100" > qgc_ip   # use your QGC machine's actual IP
+echo "192.168.50.46" > qgc_ip
 sudo systemctl restart ground-rover-daemon
 ```
 
-The `qgc_ip` file is read once at startup and takes precedence over auto-detection.
+Use the **local LAN IP** of the machine running QGC (not its WireGuard IP — the Pi routes home-LAN traffic through the tunnel). Find it on macOS: `System Settings → Network` or run `ifconfig | grep "inet "` in Terminal; on Windows: `ipconfig`; on Linux: `ip addr`.
+
+The `qgc_ip` file holds one IP with no port and is read once at startup.
 
 For details on sensor modes, CPU cost, and manual pipeline testing see [features/video.md](../features/video.md).
 
