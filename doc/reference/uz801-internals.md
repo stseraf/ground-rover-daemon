@@ -2,7 +2,7 @@
 
 Reference material for the UZ801 4G USB dongle: hardware specs, Android OS details, service architecture, and the non-obvious traps encountered when replacing the factory hotspot with a rover uplink.
 
-For the end-user setup flow see [../setup/04-lte-modem.md](../setup/04-lte-modem.md). For the runtime monitoring and switching feature see [../features/lte-uplink.md](../features/lte-uplink.md).
+For the end-user setup flow see [../setup/05-lte-modem.md](../setup/05-lte-modem.md). For the runtime monitoring and switching feature see [../features/lte-uplink.md](../features/lte-uplink.md).
 
 ---
 

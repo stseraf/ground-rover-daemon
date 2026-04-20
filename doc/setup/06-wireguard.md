@@ -1,4 +1,4 @@
-# 5. WireGuard VPN Setup
+# 6. WireGuard VPN Setup
 
 The rover is on LTE (or home WiFi) with no inbound ports. WireGuard gives it a stable, home-LAN-reachable IP (`192.168.216.6` / `pi-rover.lan`) so you can SSH in, receive MAVLink, and receive video from any PC on the home LAN — regardless of whether the rover's uplink is LTE or WiFi.
 
@@ -13,7 +13,7 @@ PC on home LAN (192.168.50.x) ─── ssh pi-rover.lan ──▶ hAP → tunne
 
 ---
 
-## 5.1 Prerequisites
+## 6.1 Prerequisites
 
 - A MikroTik hAP (or any WireGuard-capable router) with a WireGuard interface already set up on the home side.
 - An open UDP port on the router's WAN (default: `23392`).
@@ -21,7 +21,7 @@ PC on home LAN (192.168.50.x) ─── ssh pi-rover.lan ──▶ hAP → tunne
 
 ---
 
-## 5.2 Get the hAP's WireGuard details (RouterOS)
+## 6.2 Get the hAP's WireGuard details (RouterOS)
 
 ```routeros
 /interface wireguard print
@@ -33,10 +33,10 @@ Record two values from the `back-to-home-vpn` entry:
 
 ---
 
-## 5.3 Configure the Pi
+## 6.3 Configure the Pi
 
 ```bash
-make setup-wireguard HAP_PUBKEY="<key from step 5.2>" \
+make setup-wireguard HAP_PUBKEY="<key from step 6.2>" \
                      HAP_ENDPOINT="<public-ip>:<port>"
 ```
 
@@ -44,7 +44,7 @@ This:
 1. Installs `wireguard-tools`.
 2. Generates `/etc/wireguard/wg0.conf` with a fresh key pair.
 3. Enables `wg-quick@wg0` so it starts on boot.
-4. Prints the Pi's public key and the exact RouterOS command to run in step 5.4.
+4. Prints the Pi's public key and the exact RouterOS command to run in step 6.4.
 
 **Optional overrides** (if `.6` is already taken):
 
@@ -56,9 +56,9 @@ make setup-wireguard HAP_PUBKEY="…" HAP_ENDPOINT="…" \
 
 ---
 
-## 5.4 Add the Pi as a peer (RouterOS)
+## 6.4 Add the Pi as a peer (RouterOS)
 
-Paste the command printed by step 5.3. It looks like:
+Paste the command printed by step 6.3. It looks like:
 
 ```routeros
 /interface wireguard peers add interface=back-to-home-vpn \
@@ -88,7 +88,7 @@ If not already present, allow inbound WireGuard UDP and LAN ↔ VPN forwarding:
 
 ---
 
-## 5.5 DNS (RouterOS)
+## 6.5 DNS (RouterOS)
 
 ```routeros
 /ip dns static add name=pi-rover.lan address=192.168.216.6
@@ -98,7 +98,7 @@ If not already present, allow inbound WireGuard UDP and LAN ↔ VPN forwarding:
 
 ---
 
-## 5.6 Verify
+## 6.6 Verify
 
 On the Pi:
 
@@ -116,7 +116,7 @@ ssh pi-rover.lan                 # works from WiFi or LTE uplink
 
 ---
 
-## 5.7 How it interacts with the LTE ↔ WiFi uplink
+## 6.7 How it interacts with the LTE ↔ WiFi uplink
 
 The Pi's only uplink is `usb0` (the modem). Whether the modem is using LTE or home WiFi is invisible to the Pi — its routing table never changes.
 
@@ -172,4 +172,4 @@ make setup-wireguard HAP_PUBKEY="…" HAP_ENDPOINT="…"
 
 ## Next
 
-→ [06-qgroundcontrol.md](06-qgroundcontrol.md) — connect QGroundControl and verify everything works.
+→ [07-qgroundcontrol.md](07-qgroundcontrol.md) — connect QGroundControl and verify everything works.

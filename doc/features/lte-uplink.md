@@ -119,4 +119,4 @@ QGC does **not** disconnect during the switch — the Pi's UDP sockets stay boun
 
 ## Wiring & first-time setup
 
-See [../setup/02-wiring.md §2.5](../setup/02-wiring.md#25-uz801-lte-modem) and [../setup/04-lte-modem.md](../setup/04-lte-modem.md).
+See [../setup/03-wiring.md §3.5](../setup/03-wiring.md#35-uz801-lte-modem--custom-cable-required) for the custom cable pinout and [../setup/05-lte-modem.md](../setup/05-lte-modem.md) for the modem-side firmware setup.

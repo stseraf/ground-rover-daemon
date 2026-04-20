@@ -1,16 +1,16 @@
-# 6. QGroundControl Connection
+# 7. QGroundControl Connection
 
 Bring QGC up for the first time and verify all features end-to-end.
 
 ---
 
-## 6.1 Install QGroundControl
+## 7.1 Install QGroundControl
 
 Download from [qgroundcontrol.com](https://qgroundcontrol.com/) (Windows / macOS / Linux / Android). No special build needed — stock QGC works.
 
 ---
 
-## 6.2 First connection
+## 7.2 First connection
 
 Launch QGC. With the rover daemon running and the Pi reachable (via WireGuard, LTE, or local USB), QGC should auto-connect on UDP port **14550** within ~2 seconds and show:
 
@@ -22,7 +22,7 @@ If QGC doesn't connect automatically, add a link manually: **Application Setting
 
 ---
 
-## 6.3 Expected telemetry
+## 7.3 Expected telemetry
 
 Once connected you should see:
 
@@ -36,7 +36,7 @@ Once connected you should see:
 
 ---
 
-## 6.4 Joystick setup
+## 7.4 Joystick setup
 
 QGC → **Application Settings → Joysticks** → select your joystick, enable it, and map the two axes used by the daemon:
 
@@ -49,7 +49,7 @@ The daemon reads `MANUAL_CONTROL.x` (forward/back) and `MANUAL_CONTROL.r` (yaw).
 
 ---
 
-## 6.5 Video stream
+## 7.5 Video stream
 
 Each camera detected via `libcamera-hello --list-cameras` is advertised as a separate MAVLink camera component. QGC shows the camera icon in Fly view; click it to see the list of streams (one per sensor mode).
 
@@ -59,7 +59,7 @@ For details on sensor modes, CPU cost, and manual pipeline testing see [features
 
 ---
 
-## 6.6 LTE / WiFi uplink switching
+## 7.6 LTE / WiFi uplink switching
 
 The `NET_LINK_PREF` parameter controls which uplink the modem uses:
 
@@ -75,7 +75,7 @@ See [features/lte-uplink.md](../features/lte-uplink.md) for the implementation.
 
 ---
 
-## 6.7 Runtime parameters quick reference
+## 7.7 Runtime parameters quick reference
 
 | Parameter | Default | Description |
 |---|---|---|

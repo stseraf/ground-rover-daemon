@@ -94,4 +94,4 @@ If the Arduino doesn't show up, check:
 
 ## Wiring
 
-See [../setup/02-wiring.md §2.3](../setup/02-wiring.md#23-i2c-gimbal-arduino-slave).
+See [../setup/03-wiring.md §3.3](../setup/03-wiring.md#33-i2c-gimbal-arduino-slave--optional-not-hardware-tested).

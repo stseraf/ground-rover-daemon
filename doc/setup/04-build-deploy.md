@@ -1,10 +1,10 @@
-# 3. Build & Deploy the Daemon
+# 4. Build & Deploy the Daemon
 
 Cross-compile from your dev machine, deploy to the Pi via SSH, run as a `systemd` service.
 
 ---
 
-## 3.1 Dev machine prerequisites
+## 4.1 Dev machine prerequisites
 
 ```bash
 sudo apt install build-essential make gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
@@ -21,7 +21,7 @@ git submodule update --init --recursive
 
 ---
 
-## 3.2 Build variants
+## 4.2 Build variants
 
 Five independent `make` variables control the build:
 
@@ -50,7 +50,7 @@ Add `GIMBAL=i2c` only when the optional gimbal hardware is present (implemented 
 
 ---
 
-## 3.3 Deploy to the Pi
+## 4.3 Deploy to the Pi
 
 The default target host is `pi@pi-rover.lan`. Override with `RPI=pi@…` on any target.
 
@@ -75,7 +75,7 @@ echo 'export RPI=pi@pi-rover.lan' >> ~/.bashrc
 
 ---
 
-## 3.4 Service management
+## 4.4 Service management
 
 The daemon runs as `pi` with `WorkingDirectory=/home/pi/ground-rover-daemon/`. The `params` file lives next to the binary.
 
@@ -98,7 +98,7 @@ cd /home/pi/ground-rover-daemon
 
 ---
 
-## 3.5 Verify QGC can connect
+## 4.5 Verify QGC can connect
 
 On your ground control PC, launch QGroundControl. It auto-discovers rovers on UDP 14550. Expect:
 
@@ -107,10 +107,10 @@ On your ground control PC, launch QGroundControl. It auto-discovers rovers on UD
 - Telemetry RSSI Status widget shows signal bars (LTE/WiFi)
 - Parameters panel lists 8 `DRIVE_*` / `GPS_*` / `VIDEO_*` / `CTRL_*` / `NET_*` params
 
-For detailed QGC walkthrough see [06-qgroundcontrol.md](06-qgroundcontrol.md).
+For detailed QGC walkthrough see [07-qgroundcontrol.md](07-qgroundcontrol.md).
 
 ---
 
 ## Next
 
-→ [04-lte-modem.md](04-lte-modem.md) — flash the UZ801 modem with the rover firmware (one-time).
+→ [05-lte-modem.md](05-lte-modem.md) — flash the UZ801 modem with the rover firmware (one-time).

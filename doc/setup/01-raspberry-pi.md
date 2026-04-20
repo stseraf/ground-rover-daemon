@@ -130,7 +130,7 @@ groups   # should include: pi gpio i2c dialout ...
 
 ## 1.6 Disable on-board WiFi (recommended)
 
-Once the LTE modem is set up, the Pi's BCM43438 WiFi is no longer used and can cause problems (see [reference/uz801-internals.md](../reference/uz801-internals.md) for the BCM43438 firmware bug). Keep it on for now — disable it only after [04-lte-modem.md](04-lte-modem.md) is complete:
+Once the LTE modem is set up, the Pi's BCM43438 WiFi is no longer used and can cause problems (see [reference/uz801-internals.md](../reference/uz801-internals.md) for the BCM43438 firmware bug). Keep it on for now — disable it only after [05-lte-modem.md](05-lte-modem.md) is complete:
 
 ```bash
 sudo nmcli radio wifi off
@@ -142,4 +142,4 @@ This setting persists across reboots.
 
 ## Next
 
-→ [02-wiring.md](02-wiring.md) — wire up motors, gimbal, GPS, camera, and the LTE modem.
+→ [02-power.md](02-power.md) — batteries, DC-DC step-down, and how every component gets powered.

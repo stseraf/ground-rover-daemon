@@ -159,7 +159,7 @@ If no camera is detected, the component is not advertised — QGC simply shows n
 
 ## Wiring
 
-See [../setup/02-wiring.md §2.4](../setup/02-wiring.md#24-mipi-camera-ov5647--imx219).
+See [../setup/03-wiring.md §3.4](../setup/03-wiring.md#34-mipi-camera-ov5647--imx219).
 
 ---
 

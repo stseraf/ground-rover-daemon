@@ -92,4 +92,4 @@ cat /dev/serial0    # should show $GNRMC, $GNGGA sentences scrolling
 
 ## Wiring
 
-See [../setup/02-wiring.md §2.2](../setup/02-wiring.md#22-gy-gps6mv2--u-blox-neo-6m-gps).
+See [../setup/03-wiring.md §3.2](../setup/03-wiring.md#32-gy-gps6mv2--u-blox-neo-6m-gps).

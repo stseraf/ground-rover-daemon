@@ -1,4 +1,4 @@
-# 4. UZ801 LTE Modem Setup
+# 5. UZ801 LTE Modem Setup
 
 The rover's internet link is a **UZ801** 4G USB dongle — a tiny Android-based modem that exposes RNDIS (ethernet-over-USB), ADB, and serial over a single USB connection.
 
@@ -8,7 +8,7 @@ For hardware specs, internal architecture, and troubleshooting see [reference/uz
 
 ---
 
-## 4.1 Verify ADB access
+## 5.1 Verify ADB access
 
 The UZ801 exposes ADB over USB — used for pushing scripts. From the Pi:
 
@@ -29,7 +29,7 @@ adb root
 
 ---
 
-## 4.2 Disable the factory WiFi hotspot
+## 5.2 Disable the factory WiFi hotspot
 
 The factory firmware runs a WiFi hotspot (`4G-UFI-3D4`) managed by `com.mifiservice.hello`. We don't want it — disable the package permanently:
 
@@ -44,7 +44,7 @@ To re-enable: `adb shell pm enable com.mifiservice.hello`.
 
 ---
 
-## 4.3 Deploy the rover scripts
+## 5.3 Deploy the rover scripts
 
 `make deploy-modem` pushes the rover's boot-time scripts to the modem, appends a hook to the Android `post_boot` script, and reboots. After reboot the modem sets up NAT forwarding for the Pi, a status TCP server, and a link-switch TCP server.
 
@@ -74,7 +74,7 @@ What gets written on the modem:
 
 ---
 
-## 4.4 Configure static IP on the Pi's `usb0`
+## 5.4 Configure static IP on the Pi's `usb0`
 
 The Pi needs a static address on the RNDIS interface to reach the modem's NAT gateway. Run once:
 
@@ -92,7 +92,7 @@ After this, `ping -I usb0 8.8.8.8` from the Pi should succeed.
 
 ---
 
-## 4.5 (Optional) Use home WiFi instead of LTE
+## 5.5 (Optional) Use home WiFi instead of LTE
 
 The modem can act as a WiFi client when at home — saves LTE data and improves latency. Provide your home SSID + PSK:
 
@@ -112,7 +112,7 @@ Runtime switching between uplinks (without reboot) is also supported — see [fe
 
 ---
 
-## 4.6 Verify end-to-end
+## 5.6 Verify end-to-end
 
 From the Pi:
 
@@ -132,4 +132,4 @@ make verify-modem
 
 ## Next
 
-→ [05-wireguard.md](05-wireguard.md) — set up the VPN so you can reach the rover from any PC on the home LAN.
+→ [06-wireguard.md](06-wireguard.md) — set up the VPN so you can reach the rover from any PC on the home LAN.

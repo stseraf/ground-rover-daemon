@@ -71,7 +71,7 @@ Selected at build time via `make DRIVER=…`.
 | `stub` (default) | No-op. Use for host builds and protocol testing without hardware. |
 | `tb6612` | TB6612FNG H-bridge on RPi via `/sys/class/pwm/` + `/dev/gpiochip0`. |
 
-Pin assignments and PWM period are compile-time constants in `include/config.hpp` under `Config::Tb6612`. Wiring is in [../setup/02-wiring.md](../setup/02-wiring.md).
+Pin assignments and PWM period are compile-time constants in `include/config.hpp` under `Config::Tb6612`. Signal wiring is in [../setup/03-wiring.md §3.1](../setup/03-wiring.md#31-tb6612fng-motor-driver); power wiring is in [../setup/02-power.md](../setup/02-power.md).
 
 ---
 

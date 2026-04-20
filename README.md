@@ -34,16 +34,17 @@ A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and 
 
 ## Getting started
 
-Fresh Pi to ready-to-drive rover in six steps. Start from [doc/setup/01-raspberry-pi.md](doc/setup/01-raspberry-pi.md) and work through in order.
+Fresh Pi to ready-to-drive rover in seven steps. Start from [doc/setup/01-raspberry-pi.md](doc/setup/01-raspberry-pi.md) and work through in order.
 
 | # | Step | What it covers |
 |---|---|---|
 | 1 | [Raspberry Pi OS setup](doc/setup/01-raspberry-pi.md) | Flash Pi OS, edit `config.txt` (PWM, UART, I2C, GPU memory), permissions |
-| 2 | [Hardware wiring](doc/setup/02-wiring.md) | TB6612, GPS, I2C gimbal, MIPI camera, LTE modem, power |
-| 3 | [Build & deploy the daemon](doc/setup/03-build-deploy.md) | Cross-compile for aarch64, `make deploy`, systemd service |
-| 4 | [UZ801 LTE modem setup](doc/setup/04-lte-modem.md) | ADB, `make deploy-modem`, optional home WiFi credentials |
-| 5 | [WireGuard VPN](doc/setup/05-wireguard.md) | Tunnel to the home router so QGC can reach the rover on any uplink |
-| 6 | [QGroundControl connection](doc/setup/06-qgroundcontrol.md) | First connection, joystick, video stream, runtime parameters |
+| 2 | [Power topology](doc/setup/02-power.md) | 2s2p 18650 pack, XL4015 DC-DC, rail distribution, bench-debug mode |
+| 3 | [Hardware wiring](doc/setup/03-wiring.md) | TB6612, GPS, camera, optional gimbal, custom UZ801 cable |
+| 4 | [Build & deploy the daemon](doc/setup/04-build-deploy.md) | Cross-compile for aarch64, `make deploy`, systemd service |
+| 5 | [UZ801 LTE modem setup](doc/setup/05-lte-modem.md) | ADB, `make deploy-modem`, optional home WiFi credentials |
+| 6 | [WireGuard VPN](doc/setup/06-wireguard.md) | Tunnel to the router so QGC can reach the rover on any uplink |
+| 7 | [QGroundControl connection](doc/setup/07-qgroundcontrol.md) | First connection, joystick, video stream, runtime parameters |
 
 **Tested on:** Raspberry Pi OS (Debian GNU/Linux 13 "Trixie") 13.4, 64-bit, kernel 6.12.75. Newer releases should work.
 
