@@ -18,22 +18,22 @@ Use a matched BMS for 2s packs with balance leads; the XL4015 and TB6612 both to
 
 ## 2.2 Rails
 
-```
-  ┌── 2s2p 18650 pack (6.0 – 8.4 V) ────────────────────┐
-  │                                                     │
-  ├──▶ TB6612 VM ──▶ MotorA / MotorB (direct switching) │
-  │                                                     │
-  └──▶ XL4015 DC-DC step-down (set to 5.1 V)            │
+```raw
+  ┌── 2s2p 18650 pack (6.0 – 8.4 V) ─────────────────────┐
+  │                                                      │
+  ├──▶ TB6612 VM ──▶ MotorA / MotorB (direct switching)  │
+  │                                                      │
+  └──▶ XL4015 DC-DC step-down (set to 5.1 V)             │
             │                                            │
-            ├──▶ Pi 5 V rail (header pin 4)             │
+            ├──▶ Pi 5 V rail (header pin 4)              │
             │        │                                   │
-            │        ├──▶ GPS module VCC (header pin 2) │
+            │        ├──▶ GPS module VCC (header pin 2)  │
             │        ├──▶ Pi 3V3 regulator               │
-            │        │       └──▶ TB6612 VCC (pin 1)    │
+            │        │       └──▶ TB6612 VCC (pin 1)     │
             │        │       └──▶ Pi internal peripherals│
-            │        └──▶ MIPI camera (CSI connector)   │
+            │        └──▶ MIPI camera (CSI connector)    │
             │                                            │
-            └──▶ Modem VBUS (soldered to USB test pad)  │
+            └──▶ Modem VBUS (soldered to USB test pad)   │
 
   GND common across battery, DC-DC, Pi, modem, GPS, TB6612
 ```
