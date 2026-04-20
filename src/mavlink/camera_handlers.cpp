@@ -212,59 +212,19 @@ void handle_camera_command_long(MavSender& mav, RoverState& state,
         }
 
         case MAV_CMD_RESET_CAMERA_SETTINGS: {
-            logger::line("rx: RESET_CAMERA_SETTINGS(529) cam=%d — starting stream mode 0", cam_idx);
-
-            if (cam.modes.empty()) {
-                logger::line("[gst] no modes available for cam=%d", cam_idx);
-                mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_DENIED,
-                                         cmd->target_system, cmd->target_component);
-                break;
-            }
-
-            if (!state.qgc_ip_known) {
-                logger::line("[gst] cannot start — QGC IP not yet known");
-                mav.send_command_ack_cam(cc, state, cmd->command,
-                                         MAV_RESULT_TEMPORARILY_REJECTED,
-                                         cmd->target_system, cmd->target_component);
-                break;
-            }
+            logger::line("rx: RESET_CAMERA_SETTINGS(529) cam=%d — stopping stream", cam_idx);
 
             if (state.active_gst_pid > 0) {
-                logger::line("[gst] stopping previous stream (PID %d)", state.active_gst_pid);
+                logger::line("[gst] stopping stream (PID %d)", state.active_gst_pid);
                 gst_kill(state.active_gst_pid);
                 state.active_gst_pid  = -1;
                 state.active_cam_idx  = -1;
                 state.active_mode_idx = -1;
+                logger::line("[gst] stream stopped");
+                mav.send_statustext(state, MAV_SEVERITY_INFO, "Video stream stopped");
             }
-
-            const SensorMode& mode = cam.modes[0];
-            int fps = static_cast<int>(state.video_fps);
-            int max_fps = static_cast<int>(std::floor(mode.fps));
-            if (fps > max_fps) {
-                logger::line("[gst] VIDEO_FPS %d exceeds mode max %.2f, clamping to %d",
-                             fps, mode.fps, max_fps);
-                fps = max_fps;
-            }
-            state.active_gst_pid = gst_spawn(mode.width, mode.height, fps,
-                                              state.video_bitrate_bps, state.qgc_ip);
-            if (state.active_gst_pid > 0) {
-                state.active_cam_idx  = cam_idx;
-                state.active_mode_idx = 0;
-                state.gst_retry_count = 0;
-                state.gst_gave_up     = false;
-                logger::line("[gst] started: %s", mode.name);
-                char stxt[64];
-                std::snprintf(stxt, sizeof(stxt), "Stream start: %ux%u %d/%dfps %ukbps",
-                              mode.width, mode.height, fps, static_cast<int>(mode.fps),
-                              state.video_bitrate_bps / 1000);
-                mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
-                mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
-                                         cmd->target_system, cmd->target_component);
-            } else {
-                mav.send_statustext(state, MAV_SEVERITY_ERROR, "Video stream failed to start");
-                mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_FAILED,
-                                         cmd->target_system, cmd->target_component);
-            }
+            mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
+                                     cmd->target_system, cmd->target_component);
             break;
         }
 

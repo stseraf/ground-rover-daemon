@@ -54,6 +54,26 @@ static uint64_t micros()
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
 }
 
+static void autostart_stream(RoverState& state)
+{
+    if (state.cameras.empty() || state.cameras[0].modes.empty()) return;
+    if (state.active_gst_pid > 0) return;
+    const CameraInfo& cam  = state.cameras[0];
+    const SensorMode& mode = cam.modes[0];
+    int fps     = static_cast<int>(state.video_fps);
+    int max_fps = static_cast<int>(mode.fps);
+    if (fps > max_fps) fps = max_fps;
+    state.active_gst_pid = gst_spawn(mode.width, mode.height, fps,
+                                      state.video_bitrate_bps, state.qgc_ip);
+    if (state.active_gst_pid > 0) {
+        state.active_cam_idx  = 0;
+        state.active_mode_idx = 0;
+        state.gst_retry_count = 0;
+        state.gst_gave_up     = false;
+        logger::line("[gst] autostart: %s", mode.name);
+    }
+}
+
 int main()
 {
     std::signal(SIGINT,  handle_signal);
@@ -113,6 +133,8 @@ int main()
             std::fclose(f);
         }
     }
+    if (state.qgc_ip_known)
+        autostart_stream(state);
 
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -138,6 +160,7 @@ int main()
                           state.qgc_ip, sizeof(state.qgc_ip));
                 state.qgc_ip_known = true;
                 logger::line("[video] QGC IP: %s", state.qgc_ip);
+                autostart_stream(state);
             }
             for (ssize_t i = 0; i < n; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, receive_buffer[i], &msg, &status)) {
