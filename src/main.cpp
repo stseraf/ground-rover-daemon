@@ -33,6 +33,7 @@
 #include "lte/stub_lte_monitor.hpp"
 #ifdef LTE_USB
 #include "lte/usb_lte_monitor.hpp"
+#include "lte/link_switcher.hpp"
 #endif
 
 static std::atomic<bool> running{true};
@@ -90,6 +91,7 @@ int main()
 #endif
 #ifdef LTE_USB
     UsbLteMonitor lte{};
+    LinkSwitcher  link_switcher{};
 #else
     StubLteMonitor lte{};
 #endif
@@ -120,6 +122,8 @@ int main()
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
+    char     prev_uplink[8]{}; // edge-detect uplink type changes for STATUSTEXT
+    int      wifi_drop_polls   = 0; // consecutive polls: NET_LINK_PREF=WiFi but rssi=0
     mavlink_message_t msg;
     mavlink_status_t  status;
 
@@ -302,6 +306,14 @@ int main()
                                 if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0)
                                     state.video_fps =
                                         static_cast<uint32_t>(params.get(idx));
+#ifdef LTE_USB
+                                if (std::strncmp(params.name(idx), "NET_LINK_PREF", 16) == 0) {
+                                    int pref = static_cast<int>(params.get(idx));
+                                    wifi_drop_polls = 0; // reset fallback counter on manual change
+                                    if (pref == 1)      link_switcher.send("wifi");
+                                    else if (pref == 2) link_switcher.send("lte");
+                                }
+#endif
                                 logger::line("rx: PARAM_SET(23): %s=%.4f saved", params.name(idx), ps.param_value);
                             } else {
                                 logger::line("rx: PARAM_SET(23): unknown param %.16s", ps.param_id);
@@ -334,6 +346,71 @@ int main()
             lte.update();
             state.lte    = lte.status();
             last_lte_poll = now;
+
+            // Skip transient "unknown" during a switch (routes/iptables mid-swap)
+            // to avoid spurious duplicate LTE notifications.
+            bool uplink_is_real = ::strncmp(state.lte.uplink, "wifi", 4) == 0 ||
+                                  ::strncmp(state.lte.uplink, "lte", 3) == 0;
+
+            // Notify operator when active uplink type changes (LTE ↔ WiFi ↔ disconnected)
+            if (state.qgc_known && uplink_is_real &&
+                ::strncmp(state.lte.uplink, prev_uplink, sizeof(prev_uplink)) != 0) {
+                char stxt[50]{};
+                if (!state.lte.connected) {
+                    ::snprintf(stxt, sizeof(stxt), "Link: disconnected");
+                    mav.send_statustext(state, MAV_SEVERITY_WARNING, stxt);
+                } else if (::strncmp(state.lte.uplink, "wifi", 4) == 0) {
+                    if (state.lte.wifi_rssi_dbm != 0)
+                        ::snprintf(stxt, sizeof(stxt), "Link: WiFi %d dBm",
+                                   state.lte.wifi_rssi_dbm);
+                    else
+                        ::snprintf(stxt, sizeof(stxt), "Link: WiFi");
+                    mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+                } else {
+                    ::snprintf(stxt, sizeof(stxt), "Link: LTE %.23s %.7s",
+                               state.lte.oper, state.lte.netmode);
+                    mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+                }
+            }
+
+            // Kernel WG session gets stuck when the NAT path changes mid-flight;
+            // bouncing wg0 forces a fresh handshake on the new uplink.
+            if (prev_uplink[0] != '\0' && state.lte.connected && uplink_is_real &&
+                ::strncmp(state.lte.uplink, prev_uplink, sizeof(prev_uplink)) != 0) {
+                logger::line("[wg] uplink %s→%s — restarting wg0",
+                             prev_uplink, state.lte.uplink);
+                int rc = std::system("(sudo wg-quick down wg0 && sudo wg-quick up wg0) "
+                                     ">>/tmp/wg-restart.log 2>&1 &");
+                (void)rc;
+            }
+
+            if (uplink_is_real) {
+                ::strncpy(prev_uplink, state.lte.uplink, sizeof(prev_uplink) - 1);
+                prev_uplink[sizeof(prev_uplink) - 1] = '\0';
+            }
+
+#ifdef LTE_USB
+            // Auto-fallback: WiFi preferred but wpa_supplicant lost association
+            // (wpa_cli signal_poll returns FAIL → wifi_rssi_dbm stays 0 in status server).
+            // After 3 consecutive polls (~15 s) with no WiFi signal, switch to LTE.
+            if (static_cast<int>(params.get(7)) == 1 &&
+                ::strncmp(state.lte.uplink, "wifi", 4) == 0 &&
+                state.lte.wifi_rssi_dbm == 0 &&
+                state.lte.connected) {
+                if (++wifi_drop_polls >= 3) {
+                    logger::line("[lte] WiFi signal lost (%d polls) — fallback to LTE", wifi_drop_polls);
+                    link_switcher.send("lte");
+                    if (state.qgc_known)
+                        mav.send_statustext(state, MAV_SEVERITY_WARNING,
+                                            "Link: WiFi lost, LTE fallback");
+                    params.set(7, 0.0f);
+                    params.save(Config::PARAM_FILE);
+                    wifi_drop_polls = 0;
+                }
+            } else {
+                wifi_drop_polls = 0;
+            }
+#endif
         }
 
         if (state.armed != prev_armed) {
@@ -403,7 +480,7 @@ int main()
             mav.send_current_mode(state);
             mav.send_gps_raw_int(state);
             mav.send_global_position_int(state);
-            mav.send_cellular_status(state);
+            mav.send_radio_status(state);
             // One heartbeat per discovered camera component
             for (int i = 0; i < static_cast<int>(state.cameras.size()); ++i)
                 mav.send_camera_heartbeat(

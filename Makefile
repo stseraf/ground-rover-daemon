@@ -55,6 +55,7 @@ endif
 
 ifeq ($(LTE),usb)
   SRCS += src/lte/usb_lte_monitor.cpp
+  SRCS += src/lte/link_switcher.cpp
 endif
 
 HEADERS = $(wildcard include/*.hpp) \
@@ -97,7 +98,8 @@ deploy-modem: _deploy-modem-push verify-modem
 _deploy-modem-push:
 	ssh $(RPI) "mkdir -p /tmp/modem-deploy"
 	scp deploy/modem/nat_forward.sh deploy/modem/led_status.sh \
-	    deploy/modem/lte_status_srv.sh deploy/modem/deploy-modem.sh \
+	    deploy/modem/lte_status_srv.sh deploy/modem/link_switch_srv.sh \
+	    deploy/modem/deploy-modem.sh \
 	    deploy/modem/verify-modem.sh \
 	    $(RPI):/tmp/modem-deploy/
 	ssh -o ServerAliveInterval=3 -o ServerAliveCountMax=1 $(RPI) "bash /tmp/modem-deploy/deploy-modem.sh" 2>/dev/null; \
@@ -150,7 +152,21 @@ modem-cpu:
 	scp deploy/modem/measure-cpu.sh deploy/modem/measure-cpu-inner.sh $(RPI):/tmp/
 	ssh $(RPI) "bash /tmp/measure-cpu.sh $(INTERVAL)"
 
+# One-time setup for the WireGuard tunnel to the MikroTik hAP (back-to-home-vpn).
+# Get the hAP public key first: /interface wireguard print (on RouterOS)
+# Usage: make setup-wireguard HAP_PUBKEY="<key>" [RPI=pi@pi-rover.lan]
+#        [HAP_ENDPOINT=46.33.34.161:23392] [PI_WG_ADDR=192.168.216.6/24] [PI_WG_ADDR6=fc00:0:0:216::6/128]
+HAP_PUBKEY   ?=
+HAP_ENDPOINT ?= 46.33.34.161:23392
+PI_WG_ADDR   ?= 192.168.216.6/24
+PI_WG_ADDR6  ?= fc00:0:0:216::6/128
+setup-wireguard:
+	scp deploy/pi/setup-wireguard.sh $(RPI):/tmp/setup-wireguard.sh
+	ssh $(RPI) "sudo HAP_PUBKEY='$(HAP_PUBKEY)' HAP_ENDPOINT='$(HAP_ENDPOINT)' \
+	            PI_WG_ADDR='$(PI_WG_ADDR)' PI_WG_ADDR6='$(PI_WG_ADDR6)' \
+	            bash /tmp/setup-wireguard.sh"
+
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy deploy-modem _deploy-modem-push verify-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu clean
+.PHONY: all build rebuild deploy deploy-modem _deploy-modem-push verify-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu setup-wireguard clean

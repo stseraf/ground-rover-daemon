@@ -329,44 +329,52 @@ void MavSender::send_global_position_int(const RoverState& state)
     send(msg, state);
 }
 
-void MavSender::send_cellular_status(const RoverState& state)
+// CSQ 0-31 (AT+CSQ scale) → RADIO_STATUS rssi byte.
+// QGC interprets the rssi field as int8_t and displays it directly as dBm.
+// AT+CSQ dBm formula: dBm = -113 + 2*CSQ
+//   CSQ 0  → -113 dBm, CSQ 27 → -59 dBm, CSQ 31 → -51 dBm
+// CSQ > 31 (e.g. 99 = "unknown") → -127 dBm (conventional "no signal").
+static uint8_t csq_to_radio_rssi(uint8_t csq)
+{
+    int8_t dbm = (csq > 31) ? INT8_MIN : static_cast<int8_t>(-113 + 2 * csq);
+    return static_cast<uint8_t>(dbm);
+}
+
+void MavSender::send_radio_status(const RoverState& state)
 {
     if (!state.qgc_known)
         return;
 
-    mavlink_message_t msg;
-    mavlink_cellular_status_t cs{};
+    const LteStatus& lte = state.lte;
 
-    cs.mcc = UINT16_MAX;  // unknown
-    cs.mnc = UINT16_MAX;
-    cs.lac = 0;
+    // rssi  = primary link signal (int8_t dBm encoded as uint8_t).
+    // remrssi = secondary link signal (same encoding).
+    // When on WiFi: rssi = WiFi AP dBm, remrssi = LTE tower dBm (background).
+    // When on LTE:  rssi = LTE tower dBm, remrssi = 0 (no WiFi).
+    // Disconnected: rssi = -127 dBm (INT8_MIN → raw 0x80).
+    uint8_t rssi    = static_cast<uint8_t>(INT8_MIN);  // default: no signal
+    uint8_t remrssi = 0;
 
-    // Map netmode string to MAVLink radio type enum
-    const char* nm = state.lte.netmode;
-    if (::strncmp(nm, "LTE", 3) == 0)
-        cs.type = CELLULAR_NETWORK_RADIO_TYPE_LTE;
-    else if (::strncmp(nm, "3G", 2) == 0 || ::strncmp(nm, "WCDMA", 5) == 0)
-        cs.type = CELLULAR_NETWORK_RADIO_TYPE_WCDMA;
-    else if (::strncmp(nm, "2G", 2) == 0 || ::strncmp(nm, "GSM", 3) == 0)
-        cs.type = CELLULAR_NETWORK_RADIO_TYPE_GSM;
-    else
-        cs.type = CELLULAR_NETWORK_RADIO_TYPE_NONE;
-
-    if (state.lte.connected) {
-        cs.status  = CELLULAR_STATUS_FLAG_CONNECTED;
-        cs.quality = static_cast<uint8_t>(
-            static_cast<uint32_t>(state.lte.rssi) * 100u / 31u);
-    } else if (state.lte.present) {
-        cs.status  = CELLULAR_STATUS_FLAG_REGISTERED;
-        cs.quality = 0;
-    } else {
-        cs.status  = CELLULAR_STATUS_FLAG_FAILED;
-        cs.quality = 0;
+    if (lte.connected) {
+        bool wifi_active = ::strncmp(lte.uplink, "wifi", 4) == 0;
+        if (wifi_active && lte.wifi_rssi_dbm != 0) {
+            rssi    = static_cast<uint8_t>(static_cast<int8_t>(lte.wifi_rssi_dbm));
+            remrssi = csq_to_radio_rssi(lte.rssi);
+        } else {
+            rssi    = csq_to_radio_rssi(lte.rssi);
+            remrssi = 0;
+        }
     }
 
-    cs.failure_reason = 0;
+    // txbuf: repurposed as link-type sentinel visible in MAVLink Inspector.
+    // 100 = LTE active, 50 = WiFi active, 0 = no link.
+    uint8_t txbuf = 0;
+    if (lte.connected)
+        txbuf = (::strncmp(lte.uplink, "wifi", 4) == 0) ? 50 : 100;
 
-    mavlink_msg_cellular_status_encode(sys_id_, comp_id_, &msg, &cs);
+    mavlink_message_t msg;
+    mavlink_msg_radio_status_pack(sys_id_, comp_id_, &msg,
+        rssi, remrssi, txbuf, 0, 0, 0, 0);
     send(msg, state);
 }
 

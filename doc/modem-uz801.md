@@ -313,6 +313,7 @@ adb shell cat /sys/class/leds/red/brightness
 | `/system/etc/nat_forward.sh` | **Created** — bridge + NAT setup, WiFi client uplink with LTE fallback, launches LED and LTE status daemons |
 | `/system/etc/led_status.sh` | **Created** — background LED connectivity monitor |
 | `/system/etc/lte_status_srv.sh` | **Created** — TCP server on port 8080 serving LTE signal/operator info to Pi daemon |
+| `/system/etc/link_switch_srv.sh` | **Created** — TCP command server on port 8081 — accepts `wifi`/`lte` commands to switch active uplink at runtime |
 | `/system/etc/init.qcom.post_boot.sh` | **Appended** — calls `nat_forward.sh` at boot |
 | `/data/logs/` | **Created** — log directory (`mkdir -p /data/logs && chmod 777 /data/logs`) |
 | `/data/misc/wifi/rover_wpa.conf` | **Optional** — WiFi credentials; presence enables WiFi client uplink |
@@ -325,6 +326,7 @@ Logs at runtime:
 - `/data/logs/led_status.log` — LED daemon startup and first 3 poll cycles
 - `/data/logs/wpa_supplicant.log` — wpa_supplicant output (WiFi client mode only)
 - `/data/logs/lte_status_srv.log` — LTE status TCP server output
+- `/data/logs/link_switch_srv.log` — link switch command server output (runtime uplink switches)
 
 ---
 
@@ -367,7 +369,8 @@ adb shell "echo 0   > /sys/class/leds/red/brightness"
 | `adbd`               | running | ADB daemon                                     |
 | `thermal-engine`     | running | Thermal management                             |
 | `led_status.sh`      | running | LED connectivity indicator (launched by nat_forward.sh) |
-| `lte_status_srv.sh`  | running | TCP server on port 8080 — LTE signal/operator info for Pi daemon |
+| `lte_status_srv.sh`  | running | TCP server on port 8080 — LTE + WiFi signal/operator info for Pi daemon |
+| `link_switch_srv.sh` | running | TCP command server on port 8081 — applies `wifi`/`lte` switch commands from Pi daemon |
 | `wpa_supplicant`     | running (WiFi) / stopped (LTE) | WiFi client — runs when `rover_wpa.conf` present and association succeeds |
 | `com.mifiservice.hello` | disabled | WiFi hotspot manager — permanently disabled |
 | `hostapd`            | stopped | WiFi AP — not started                          |
@@ -590,11 +593,173 @@ After a cold power cycle, the WCNSS WiFi chip can take anywhere from 0s to 60+ s
 finish firmware initialization before wpa_supplicant can use it. On a warm reboot (module
 already loaded) it is typically instant. The 90s association timeout accommodates the worst case.
 
+**8. WiFi RSSI is only readable via wpa_cli, not dumpsys or /proc**
+`dumpsys wifi` always returns `RSSI: -9999` because the Android WiFi framework (`WifiService`)
+is in `UNINITIALIZED` state — wpa_supplicant was started directly, bypassing the framework.
+`/proc/net/wireless` always shows zeros because the Qualcomm WCNSS driver does not populate it.
+The only working source is `wpa_cli -p /data/misc/wifi/sockets -iwlan0 signal_poll`, which
+queries wpa_supplicant directly. Returns `FAIL` when not associated (safe to parse — `atoi("FAIL") = 0`).
+
 **7. Android 4.4 shell is missing most Unix tools**
 `tr`, `cut`, `awk`, `sed`, `killall`, `printf`, `tail` — none available. Use only `grep` and
 POSIX shell builtins. For example, parse `ip route` output with `set -- $line; field=$3` instead
 of `awk '{print $3}'`; check wpa_cli state with `grep -q "wpa_state=COMPLETED"` instead of
-piping through `cut`.
+piping through `cut`. `busybox` is present — `busybox killall`, `busybox nc` work.
+
+**9. `pidof wpa_supplicant` misses the real process**
+wpa_supplicant re-execs itself as `user=wifi` (via file capabilities). Android 4.4's `pidof`
+only inspects a subset of `/proc` and silently misses processes that have changed uid. A script
+running as root that tries `kill $(pidof wpa_supplicant)` gets nothing and silently leaves the
+old instance running. **Use `busybox killall wpa_supplicant`** — it scans all of `/proc`
+regardless of uid. Same fix applies to `dhcpcd`.
+
+**10. `wpa_cli` ctrl socket disappears while wpa_supplicant is alive**
+After some time (minutes to hours), `/data/misc/wifi/sockets/wlan0` can vanish even though
+`wpa_supplicant` is still running and the interface is associated. Subsequent `wpa_cli`
+invocations then fail with `"Failed to connect to non-global ctrl_ifname"`. Do not rely on
+`wpa_cli` for detecting association state in long-running code. **Use
+`/sys/class/net/wlan0/carrier`** (returns `1` when associated) — this is a kernel flag and is
+always accurate.
+
+**11. Killing wpa_supplicant leaves the WCNSS chip in a stuck state**
+After `busybox killall wpa_supplicant`, a freshly-started wpa_supplicant can initialize
+(socket appears) but **never associates** — `carrier` stays `0` indefinitely. The chip firmware
+is in some internal state the driver can't clear via a restart. The only reliable recovery is
+a full module reload: `rmmod wlan && insmod /system/lib/modules/wlan.ko`, then wait ~5s for
+firmware re-init before starting wpa_supplicant. This is why `link_switch_srv.sh` always
+unloads/reloads the module on every `wifi` switch.
+
+**12. `dhcpcd` on wlan0 fails when LTE is the default route**
+`dhcpcd wlan0` sends a DHCP Discover to 255.255.255.255. The kernel routes it via the default
+route — which at that point is still `rmnet0` — so the broadcast exits via LTE and never
+reaches the home router. Symptom: dhcpcd reports `no IPv4_addresses`, no `default.*wlan0`
+route appears. **Delete the LTE default route before invoking dhcpcd**:
+```sh
+ip route del default via $(getprop net.rmnet0.gw) dev rmnet0
+```
+If WiFi association then fails, restore the LTE route (dhcpcd will have left WiFi without a
+route).
+
+---
+
+## LTE Status Server
+
+`lte_status_srv.sh` runs as a TCP server on port **8080** (`192.168.100.1:8080`). The Pi daemon
+connects every 5 seconds and reads one line of `key=value` pairs, then the server loops and waits
+for the next connection.
+
+### Status line format
+
+```
+connected=1 rssi=27 netmode=LTE oper=KYIVSTAR uplink=wifi wifi_rssi=-65
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `connected` | `0`/`1` | LTE data active — `net.rmnet0.dns1` is non-empty |
+| `rssi` | `0–31` | LTE signal strength (AT+CSQ scale; `0` = unknown) |
+| `netmode` | string | Network type from `gsm.network.type` (`LTE`, `UMTS`, `EDGE`, …) |
+| `oper` | string | Operator name from `gsm.operator.alpha` |
+| `uplink` | `lte`/`wifi`/`unknown` | Active default-route interface (`rmnet0` → `lte`, `wlan0` → `wifi`) |
+| `wifi_rssi` | `−10` to `−100` dBm, or `0` | WiFi AP signal strength; `0` when LTE uplink or not associated |
+
+### WiFi RSSI source
+
+Three approaches were evaluated on this modem — only one works:
+
+| Source | Result | Reason |
+|--------|--------|--------|
+| `dumpsys wifi \| grep RSSI` | Always `-9999` | Android WiFi framework is `UNINITIALIZED` — WiFi is managed below the framework level |
+| `/proc/net/wireless` | Always `0 0 0` | Qualcomm WCNSS driver does not populate this kernel file |
+| `wpa_cli -p /data/misc/wifi/sockets -iwlan0 signal_poll` | **Correct RSSI** | Queries wpa_supplicant directly; returns `RSSI=-65\nLINKSPEED=86\n…` or `FAIL` if not associated |
+
+The script only calls `wpa_cli` when `uplink=wifi`; on LTE uplink `wifi_rssi=0` is sent.
+
+### How the Pi daemon uses this data
+
+The daemon encodes both signals into a MAVLink **RADIO_STATUS** (message ID 109) sent at 1 Hz to QGroundControl:
+
+| RADIO_STATUS field | WiFi uplink | LTE uplink |
+|--------------------|-------------|------------|
+| `rssi` | WiFi AP dBm (int8\_t as uint8\_t) | LTE dBm (`−113 + 2×CSQ`) |
+| `remrssi` | LTE dBm (background signal) | `0` |
+| `txbuf` | `50` (sentinel: WiFi active) | `100` (sentinel: LTE active) |
+
+QGC displays `rssi` as **Local RSSI** and `remrssi` as **Remote RSSI** in the Telemetry RSSI Status widget. The signal icon appears automatically when `rssi > 0`.
+
+> **Why not CELLULAR_STATUS (ID 334)?** QGC's codebase has no handler for message 334 — it is never decoded and no widget appears. RADIO_STATUS is fully supported.
+
+---
+
+## Runtime Uplink Switching
+
+The operator can flip the active uplink (WiFi ↔ LTE) from QGroundControl without rebooting
+the modem. The mechanism has three pieces:
+
+1. **MAVLink parameter `NET_LINK_PREF`** — set from QGC's Parameters panel.
+2. **`link_switch_srv.sh`** — TCP command server on modem port `8081`.
+3. **Pi daemon (`LinkSwitcher`)** — forwards the request and auto-recovers WireGuard.
+
+### MAVLink parameter
+
+| Param | Value | Behavior |
+|-------|-------|----------|
+| `NET_LINK_PREF` | `0` | auto — keep current uplink |
+| `NET_LINK_PREF` | `1` | prefer WiFi — Pi sends `wifi` to the modem |
+| `NET_LINK_PREF` | `2` | force LTE — Pi sends `lte` to the modem |
+
+The parameter is persisted in `params.cfg` on the Pi so the operator-selected preference
+survives daemon restarts.
+
+### Command server (`link_switch_srv.sh`)
+
+Runs on `192.168.100.1:8081`, one connection per command. Client sends a single line:
+
+```
+wifi      # or "lte"
+```
+
+Then closes. Behavior:
+
+| Command | Actions performed on the modem |
+|---------|--------------------------------|
+| `wifi` | `busybox killall wpa_supplicant dhcpcd` → `rmmod wlan` → `insmod` → wait for interface → start `wpa_supplicant` → wait ≤45 s for `/sys/class/net/wlan0/carrier=1` → delete LTE default route → `dhcpcd wlan0` → swap iptables to WiFi NAT + port-forwarding. On any failure, falls back to `lte`. |
+| `lte` | `busybox killall wpa_supplicant dhcpcd` → flush wlan0 addresses → flush WiFi iptables → re-add LTE MASQUERADE + FORWARD rules → restore `ip route default via $net.rmnet0.gw dev rmnet0`. Fast (~2 s). Idempotent. |
+
+The server is async: the `nc -l` accept loop runs the switch function in a background subshell
+so the next command can cancel an in-progress switch. Result is not returned synchronously —
+the Pi daemon observes completion via the next `lte_status_srv` (port 8080) poll, where the
+`uplink=` field changes.
+
+### Pi daemon behavior
+
+Lives in [`src/lte/link_switcher.hpp`](../src/lte/link_switcher.hpp) and
+[`src/main.cpp`](../src/main.cpp).
+
+- **PARAM_SET handler**: when QGC sets `NET_LINK_PREF` to 1 or 2, the daemon opens a TCP
+  connection to modem `8081` (3 s connect timeout) and writes `wifi\n` or `lte\n`.
+- **Transition notification**: the LTE status poller (every 5 s) watches the `uplink=`
+  field. When it changes between `wifi` and `lte`, the daemon emits a MAVLink STATUSTEXT
+  (`"Link: WiFi S_HOME -65 dBm"` or `"Link: LTE KYIVSTAR LTE"`) to QGC. Transient
+  `uplink=unknown` states during a switch are suppressed to avoid duplicate messages.
+- **WireGuard auto-recovery**: the kernel WG session becomes unresponsive when the
+  underlying NAT path changes (the modem masquerades via a different egress interface; the
+  WG remote sees packets arriving from a new source). On every real `wifi ↔ lte` transition
+  the daemon runs `sudo wg-quick down wg0 && sudo wg-quick up wg0` in the background. This
+  forces a fresh handshake on the new uplink. Logged to `/tmp/wg-restart.log` on the Pi.
+
+> **Sudo requirement**: the Pi's `pi` user has `NOPASSWD: ALL` via
+> `/etc/sudoers.d/010_pi-nopasswd`, which the daemon relies on for the WG bounce.
+
+### End-to-end timing
+
+| Transition | Time-to-QGC-restored |
+|------------|----------------------|
+| LTE → WiFi | ~15–45 s (module reload + WPA2 association + DHCP) + ~3 s WG re-handshake |
+| WiFi → LTE | ~2 s (route restore) + ~3 s WG re-handshake |
+
+During the switch window the MAVLink/video links pause but QGC does not disconnect — the
+UDP endpoints on the Pi stay bound; only the NAT path underneath is swapping.
 
 ---
 

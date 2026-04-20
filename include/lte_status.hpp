@@ -9,6 +9,7 @@ struct LteStatus {
     char     netmode[8]{};       // "LTE", "UMTS", "EDGE", …
     char     oper[24]{};         // operator name e.g. "KYIVSTAR"
     char     uplink[8]{};        // "lte", "wifi", or "" if unknown
+    int8_t   wifi_rssi_dbm = 0;  // WiFi AP signal in dBm (0 = unknown; valid is always < 0)
     uint64_t rx_bytes  = 0;      // cumulative RX bytes on usb0 since Pi boot
     uint64_t tx_bytes  = 0;      // cumulative TX bytes on usb0 since Pi boot
 };

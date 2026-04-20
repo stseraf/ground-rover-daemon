@@ -177,4 +177,9 @@ log "launching lte_status_srv.sh"
 /system/etc/lte_status_srv.sh > /data/logs/lte_status_srv.log 2>&1 &
 log "lte_status_srv launched pid=$!"
 
+# --- Link switch command server (Pi daemon sends 'wifi' or 'lte' to port 8081) ---
+log "launching link_switch_srv.sh"
+/system/etc/link_switch_srv.sh > /data/logs/link_switch_srv.log 2>&1 &
+log "link_switch_srv launched pid=$!"
+
 log "=== nat_forward.sh done ==="
