@@ -3,24 +3,28 @@
 A field-deployable differential-drive rover built on a Raspberry Pi Zero 2W and controlled from [QGroundControl](https://qgroundcontrol.com/) over LTE. The daemon is the MAVLink bridge between QGC and the hardware: joystick in, motor PWM + gimbal servos out, GPS + radio telemetry back.
 
 ```
-  ┌─── QGC (operator PC) ────────────┐
+  ┌─── QGC (operator PC, home LAN) ──┐
   │  joystick · video · parameters   │
   └──────────────┬───────────────────┘
-                 │ MAVLink UDP 14550
-                 │ + H.264 RTP 5600
-                 │ (via WireGuard VPN)
-  ┌──────────────┴───────────────────┐
-  │  Raspberry Pi Zero 2W            │
-  │   ground_rover_daemon            │
+                 │ MAVLink UDP + H.264 RTP
+                 ▼
+  ┌─── Home router (WireGuard peer) ─┐
+  │  back-to-home VPN endpoint       │
+  └──────────────┬───────────────────┘
+                 │ encrypted UDP over Internet
+                 ▼
+  ┌─── UZ801 LTE modem ──────────────┐
+  │  rover gateway · LTE ⇄ WiFi      │
+  │  NAT / port-forward to Pi        │
+  └──────────────┬───────────────────┘
+                 │ USB (RNDIS + ADB)
+                 ▼
+  ┌─── Raspberry Pi Zero 2W ─────────┐
+  │  ground_rover_daemon             │
   │   ├─ TB6612 motor driver         │
   │   ├─ I2C gimbal (Arduino)        │
   │   ├─ NMEA GPS (NEO-6M)           │
   │   └─ GStreamer H.264 (MIPI cam)  │
-  └──────────────┬───────────────────┘
-                 │ USB (RNDIS + ADB)
-  ┌──────────────┴───────────────────┐
-  │  UZ801 LTE modem                 │
-  │   LTE ⇄ home WiFi uplink         │
   └──────────────────────────────────┘
 ```
 
