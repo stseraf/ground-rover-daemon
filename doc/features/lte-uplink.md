@@ -56,12 +56,19 @@ QGC has no handler for `CELLULAR_STATUS` (msg 334), so the daemon uses `RADIO_ST
 
 QGC displays `rssi` as **Local RSSI** and `remrssi` as **Remote RSSI**. The signal icon appears automatically when `rssi > 0`.
 
-The daemon also emits `STATUSTEXT` messages on transitions:
+The daemon also emits `STATUSTEXT` messages on transitions and thresholds:
 
-- `"Link: WiFi S_HOME -65 dBm"` when switching to WiFi
-- `"Link: LTE KYIVSTAR LTE"` when switching to LTE
+| Message | Trigger |
+|---|---|
+| `"Link: WiFi -65 dBm"` | Active uplink changes to WiFi |
+| `"Link: LTE KYIVSTAR LTE"` | Active uplink changes to LTE |
+| `"Link: disconnected"` | Modem loses connectivity |
+| `"LTE session: rx 10.2 MB tx 3.1 MB"` | LTE RX or TX crosses next `NET_LOG_STEP_MB` boundary |
+| `"[lte] low LTE signal: rssi=7 (CSQ, warn < 10)"` | LTE CSQ drops below 10 (edge-triggered) |
+| `"[lte] low WiFi signal: -78 dBm (warn < -75)"` | WiFi RSSI drops below −75 dBm (edge-triggered) |
+| `"[lte] signal recovered on lte"` | Signal climbs back above threshold |
 
-Transient `uplink=unknown` states (seen during a switch while routes are mid-swap) are suppressed to avoid spurious duplicate messages.
+Transient `uplink=unknown` states (seen during a switch while routes are mid-swap) are suppressed to avoid spurious duplicate messages. Per-poll rssi change logs (`rssi=X→Y`) are suppressed — only threshold crossings are emitted.
 
 ---
 
@@ -114,6 +121,26 @@ Runs in the background, logged to `/tmp/wg-restart.log` on the Pi. Relies on the
 | WiFi → LTE | ~2 s (route restore) + ~3 s WG re-handshake |
 
 QGC does **not** disconnect during the switch — the Pi's UDP sockets stay bound and the daemon keeps running; only the NAT path underneath is swapping. Video freezes briefly, MAVLink catches up within one heartbeat interval after the tunnel comes back.
+
+---
+
+## LTE session traffic monitoring
+
+The daemon tracks how much data has been sent over the LTE radio since the process started and logs a summary every `NET_LOG_STEP_MB` megabytes (default: 10 MB). The log goes to stdout (journalctl) **and** QGC `STATUSTEXT`:
+
+```
+[lte] LTE session: rx 20.5 MB tx 6.1 MB
+```
+
+**What counts:** only bytes transferred through `usb0` while the active uplink is `lte`. WiFi bytes are excluded (they don't consume mobile data). Traffic on LTE is still tracked even if QGC is not connected.
+
+**Session definition:** counters are local variables reset at daemon startup. They are **not** reset by QGC disconnect/reconnect, modem USB unplug/replug, or uplink switches — only a daemon restart or Pi reboot resets them.
+
+**Uplink pause:** when the uplink switches to WiFi, accumulation pauses; it resumes when the uplink returns to LTE. The source data is `/proc/net/dev` `usb0` byte counters read each poll; delta accumulation handles counter resets (e.g., after a USB re-attach) without a false spike.
+
+**Threshold behaviour:** the step is compared against the byte total at last emission, so changing `NET_LOG_STEP_MB` mid-session doesn't immediately re-trigger at the old boundary — the next crossing of the new step size fires normally.
+
+To disable, set `NET_LOG_STEP_MB = 0`. See [../reference/parameters.md](../reference/parameters.md) for the full parameter description.
 
 ---
 
