@@ -29,7 +29,15 @@ PC on home LAN (192.168.50.x) ─── ssh pi-rover.lan ──▶ hAP → tunne
 
 Record two values from the `back-to-home-vpn` entry:
 - `public-key` → used as `HAP_PUBKEY` below
-- `listen-port` → used in `HAP_ENDPOINT` (public-IP:port)
+- `listen-port` → used in `HAP_ENDPOINT` (see below)
+
+You also need your home network's **public WAN IP** (the IP your ISP assigns to the hAP's WAN port). Find it at the hAP:
+
+```routeros
+/ip address print where interface=pppoe-out1
+```
+
+or just check a "what is my IP" site from the home LAN. Use it as the `<public-ip>` in the next step.
 
 ---
 
@@ -37,10 +45,12 @@ Record two values from the `back-to-home-vpn` entry:
 
 ```bash
 make setup-wireguard HAP_PUBKEY="<key from step 6.2>" \
-                     HAP_ENDPOINT="<public-ip>:<port>"
+                     HAP_ENDPOINT="<home-wan-ip>:<listen-port>"
 ```
 
-This:
+`HAP_ENDPOINT` is your **home WAN IP** and the hAP's WireGuard `listen-port` — this is the address the Pi dials out to from the field. It gets written to `/etc/wireguard/wg0.conf` as `Endpoint = <home-wan-ip>:<port>` and is the only place in the rover config where the home public IP appears.
+
+This command:
 1. Installs `wireguard-tools`.
 2. Generates `/etc/wireguard/wg0.conf` with a fresh key pair.
 3. Enables `wg-quick@wg0` so it starts on boot.

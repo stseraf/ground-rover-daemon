@@ -10,15 +10,27 @@ Download from [qgroundcontrol.com](https://qgroundcontrol.com/) (Windows / macOS
 
 ---
 
-## 7.2 First connection
+## 7.2 Add a comm link (required for WireGuard)
 
-Launch QGC. With the rover daemon running and the Pi reachable (via WireGuard, LTE, or local USB), QGC should auto-connect on UDP port **14550** within ~2 seconds and show:
+QGC's auto-discover uses UDP broadcast, which does not cross a WireGuard tunnel. **You must add a manual comm link the first time.**
+
+**Application Settings → Comm Links → Add**
+
+| Field | Value |
+|---|---|
+| Name | `rover` (or anything) |
+| Type | UDP |
+| Listening Port | 14550 |
+| Server Address | `pi-rover.lan` *(when on home LAN / WireGuard)* |
+| High Latency | off |
+
+Click **Connect**, then **OK**. Tick **Automatically Connect on Start** so you don't have to repeat this.
+
+Once connected, QGC shows:
 
 - **Vehicle 1** in the top-left vehicle selector
 - **MAV_TYPE_GROUND_ROVER** icon
 - A heartbeat indicator pulsing green
-
-If QGC doesn't connect automatically, add a link manually: **Application Settings → Comm Links → Add** → Type: UDP, Port: 14550, Server Address: `pi-rover.lan` (when on WireGuard) or the Pi's LTE-reachable IP.
 
 ---
 
@@ -53,7 +65,17 @@ The daemon reads `MANUAL_CONTROL.x` (forward/back) and `MANUAL_CONTROL.r` (yaw).
 
 Each camera detected via `libcamera-hello --list-cameras` is advertised as a separate MAVLink camera component. QGC shows the camera icon in Fly view; click it to see the list of streams (one per sensor mode).
 
-When you select a stream, QGC sends `MAV_CMD_VIDEO_START_STREAMING`; the daemon spawns a GStreamer pipeline that delivers H.264 RTP to QGC at `udp://0.0.0.0:5600`.
+When you select a stream, QGC sends `MAV_CMD_VIDEO_START_STREAMING`; the daemon spawns a GStreamer pipeline that delivers H.264 RTP to QGC's IP on port **5600**.
+
+The daemon learns QGC's IP from the source address of the first MAVLink packet it receives. Through WireGuard this is QGC's LAN IP (e.g., `192.168.50.100`), which is correct. If video never starts but MAVLink works, the IP detection may have misfired — override it:
+
+```bash
+# on the Pi, in /home/pi/ground-rover-daemon/
+echo "192.168.50.100" > qgc_ip   # use your QGC machine's actual IP
+sudo systemctl restart ground-rover-daemon
+```
+
+The `qgc_ip` file is read once at startup and takes precedence over auto-detection.
 
 For details on sensor modes, CPU cost, and manual pipeline testing see [features/video.md](../features/video.md).
 
@@ -77,18 +99,18 @@ See [features/lte-uplink.md](../features/lte-uplink.md) for the implementation.
 
 ## 7.7 Runtime parameters quick reference
 
-| Parameter | Default | Description |
+| Parameter | Recommended | Description |
 |---|---|---|
-| `DRIVE_DEAD_ZONE` | 30 | Joystick dead zone (0–1000) |
-| `DRIVE_SLEW_MS` | 500 | Slew-rate ramp time (ms) |
-| `DRIVE_TRIM` | 0 | Motor balance offset |
-| `CTRL_TIMEOUT_MS` | 500 | Failsafe: stop if no input for this many ms |
-| `GPS_RAW_LOG` | 0 | 1 = log raw NMEA sentences |
-| `VIDEO_BITRATE` | 5000000 | H.264 encoder bitrate (bps) |
-| `VIDEO_FPS` | 30 | Frame rate |
-| `NET_LINK_PREF` | 0 | Uplink preference (0/1/2) |
+| `DRIVE_DEAD_ZONE` | **50** | Joystick dead zone — inputs below ±50 are zero; prevents creep from stick slop |
+| `DRIVE_SLEW_MS` | **250** | Ramp time 0 → full power; snappier than the 500 ms default |
+| `DRIVE_TRIM` | **−45** | Motor balance — adjust until the rover drives straight (negative = boost right motor) |
+| `CTRL_TIMEOUT_MS` | **300** | Failsafe stop if no joystick packet for 300 ms |
+| `GPS_RAW_LOG` | **0** | 0 = off; 1 = print raw NMEA to logs (debug only) |
+| `VIDEO_BITRATE` | **5 000 000** | H.264 bitrate (bps); 5 Mbps suits LTE |
+| `VIDEO_FPS` | **30** | Frame rate cap |
+| `NET_LINK_PREF` | **1** | 1 = prefer WiFi when in range, fall back to LTE automatically |
 
-Full details: [reference/parameters.md](../reference/parameters.md).
+Full details and compile-time defaults: [reference/parameters.md](../reference/parameters.md).
 
 ---
 

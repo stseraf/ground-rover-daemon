@@ -57,6 +57,21 @@ Change live from QGC; the running pipeline is restarted with the new setting.
 
 ---
 
+## QGC IP detection and the `qgc_ip` file
+
+The GStreamer pipeline sends H.264 RTP to `udp://<QGC-IP>:5600`. The daemon learns the QGC IP from the source address of the first MAVLink packet it receives. Through WireGuard this is normally QGC's LAN IP, which is correct.
+
+If video never starts but MAVLink is connected, the IP detection may have misfired (e.g., the first packet came from a different source). Override with the `qgc_ip` file:
+
+```bash
+echo "192.168.50.100" > /home/pi/ground-rover-daemon/qgc_ip
+sudo systemctl restart ground-rover-daemon
+```
+
+The file is read once at daemon startup. Remove it to revert to auto-detection.
+
+---
+
 ## The GStreamer pipeline
 
 For 1296 × 972 the daemon spawns:

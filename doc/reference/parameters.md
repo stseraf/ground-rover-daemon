@@ -8,39 +8,45 @@ Source: [`src/mavlink/param_store.cpp`](../../src/mavlink/param_store.cpp).
 
 ## Parameter list
 
-| # | Name | Type | Default | Range | Effect |
-|---|---|---|---|---|---|
-| 0 | `DRIVE_DEAD_ZONE` | int | 30 | 0–1000 | Joystick dead zone (axis units). Inputs below ±N are zero. |
-| 1 | `DRIVE_SLEW_MS` | int | 500 | 0–5000 | Ramp time from 0 to full motor power (ms). |
-| 2 | `DRIVE_TRIM` | int | 0 | −500 to +500 | Left/right motor balance. Positive → more left. |
-| 3 | `CTRL_TIMEOUT_MS` | int | 500 | 50–5000 | Failsafe: stop motors after this many ms with no `MANUAL_CONTROL`. |
-| 4 | `GPS_RAW_LOG` | bool | 0 | 0 or 1 | 1 = also log raw NMEA sentences to stdout. |
-| 5 | `VIDEO_BITRATE` | int | 5 000 000 | 25 000 – 25 000 000 | H.264 encoder target bitrate (bps). |
-| 6 | `VIDEO_FPS` | int | 30 | 1 – 60 | Video frame rate cap. |
-| 7 | `NET_LINK_PREF` | enum | 0 | 0/1/2 | 0 = auto, 1 = WiFi-prefer, 2 = LTE-force. |
+| # | Name | Type | Default | Recommended | Range | Effect |
+|---|---|---|---|---|---|---|
+| 0 | `DRIVE_DEAD_ZONE` | int | 30 | **50** | 0–1000 | Joystick inputs below ±N are treated as zero. Prevents motor jitter from stick imprecision; increase if the rover creeps when the stick is released. |
+| 1 | `DRIVE_SLEW_MS` | int | 500 | **250** | 0–5000 | Time to ramp from 0 to full motor power (ms). Lower = snappier response. 0 = instant (hard jerk). |
+| 2 | `DRIVE_TRIM` | int | 0 | **−45** | −500 to +500 | Left/right motor balance. Positive → more power to left motor (corrects veer-right). Negative → more power to right (corrects veer-left). Tune by driving straight and adjusting until the rover tracks a straight line. |
+| 3 | `CTRL_TIMEOUT_MS` | int | 500 | **300** | 50–5000 | Failsafe: slew motors to zero if no `MANUAL_CONTROL` packet arrives within this time. Lower = faster stop on link glitch; too low causes spurious stops on a busy network. |
+| 4 | `GPS_RAW_LOG` | bool | 0 | **0** | 0 or 1 | 1 = also print raw NMEA sentences to daemon stdout (journalctl). Useful for diagnosing GPS issues; keep off in normal operation. |
+| 5 | `VIDEO_BITRATE` | int | 5 000 000 | **5 000 000** | 25 000–25 000 000 | H.264 encoder target bitrate (bps). 5 Mbps is a good balance for LTE — raise for local WiFi, lower if the stream stutters on LTE. |
+| 6 | `VIDEO_FPS` | int | 30 | **30** | 1–60 | Frame rate cap. Capped further by the sensor mode's physical limit; 1296×972 mode tops out at ~46 fps. |
+| 7 | `NET_LINK_PREF` | enum | 0 | **1** | 0/1/2 | 0 = auto (keep current uplink), 1 = prefer WiFi (switch to home WiFi when available), 2 = force LTE. Set to 1 when home WiFi is provisioned — the modem falls back to LTE automatically if WiFi drops. |
 
-All parameters are `MAV_PARAM_TYPE_REAL32` on the wire; the daemon rounds to int where appropriate internally.
+All parameters are `MAV_PARAM_TYPE_REAL32` on the wire; the daemon rounds to int where appropriate internally. The `params` file may store floats in scientific notation (e.g., `VIDEO_BITRATE=5e+06`) — this is equivalent to `5000000` and handled correctly.
 
 ---
 
 ## Persistence
 
-On boot the daemon reads `params` (a plain-text `KEY=VALUE` file) relative to the process `WorkingDirectory`:
+On boot the daemon reads `params` (a plain-text `KEY=VALUE` file) relative to the process `WorkingDirectory` (`/home/pi/ground-rover-daemon/`):
 
 ```
-DRIVE_DEAD_ZONE=30
-DRIVE_SLEW_MS=500
-DRIVE_TRIM=0
-CTRL_TIMEOUT_MS=500
+DRIVE_DEAD_ZONE=50
+DRIVE_SLEW_MS=250
+DRIVE_TRIM=-45
+CTRL_TIMEOUT_MS=300
 GPS_RAW_LOG=0
-VIDEO_BITRATE=5000000
+VIDEO_BITRATE=5e+06
 VIDEO_FPS=30
-NET_LINK_PREF=0
+NET_LINK_PREF=1
 ```
 
-When QGC sends `PARAM_SET`, the daemon writes the file back atomically. Missing keys fall back to their compile-time defaults.
+When QGC sends `PARAM_SET`, the daemon writes the file back atomically. Missing keys fall back to compile-time defaults.
 
-The file is safe to edit by hand (stop the service, edit, start).
+The file is safe to edit by hand — stop the service, edit, start:
+
+```bash
+sudo systemctl stop ground-rover-daemon
+nano /home/pi/ground-rover-daemon/params
+sudo systemctl start ground-rover-daemon
+```
 
 ---
 
