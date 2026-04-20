@@ -146,6 +146,9 @@ int main()
     bool     prev_armed        = false;
     char     prev_uplink[8]{}; // edge-detect uplink type changes for STATUSTEXT
     int      wifi_drop_polls   = 0; // consecutive polls: NET_LINK_PREF=WiFi but rssi=0
+    bool     banner_sent       = false; // one-shot per QGC session: STATUSTEXT banner
+    bool     prev_gps_valid    = false; // edge-detect GPS fix acquired/lost
+    uint64_t last_qgc_packet_us = 0;    // for reconnect detection (silence > QGC_RECONNECT_GAP_US)
     mavlink_message_t msg;
     mavlink_status_t  status;
 
@@ -154,6 +157,17 @@ int main()
         ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
                               state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
+            uint64_t now_us = micros();
+            if (last_qgc_packet_us != 0 &&
+                (now_us - last_qgc_packet_us) > Config::QGC_RECONNECT_GAP_US) {
+                logger::line("[qgc] reconnect detected (gap %llu ms) — re-arming status messages",
+                             static_cast<unsigned long long>(
+                                 (now_us - last_qgc_packet_us) / 1000));
+                banner_sent    = false;
+                prev_gps_valid = false;
+                prev_uplink[0] = '\0';
+            }
+            last_qgc_packet_us = now_us;
             state.qgc_known = true;
             if (!state.qgc_ip_known) {
                 inet_ntop(AF_INET, &state.qgc_addr.sin_addr,
@@ -161,6 +175,26 @@ int main()
                 state.qgc_ip_known = true;
                 logger::line("[video] QGC IP: %s", state.qgc_ip);
                 autostart_stream(state);
+            }
+            if (!banner_sent) {
+                char banner[64];
+                std::snprintf(banner, sizeof(banner), "Rover %s@%s", GIT_BRANCH, GIT_SHA);
+                mav.send_statustext(state, MAV_SEVERITY_INFO, banner);
+                if (state.active_gst_pid > 0 &&
+                    state.active_cam_idx >= 0 && state.active_mode_idx >= 0) {
+                    const SensorMode& m =
+                        state.cameras[state.active_cam_idx].modes[state.active_mode_idx];
+                    int fps     = static_cast<int>(state.video_fps);
+                    int max_fps = static_cast<int>(m.fps);
+                    if (fps > max_fps) fps = max_fps;
+                    char stxt[64];
+                    std::snprintf(stxt, sizeof(stxt),
+                                  "Stream autostart: %ux%u %d/%dfps %ukbps",
+                                  m.width, m.height, fps, max_fps,
+                                  state.video_bitrate_bps / 1000);
+                    mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+                }
+                banner_sent = true;
             }
             for (ssize_t i = 0; i < n; i++) {
                 if (mavlink_parse_char(MAVLINK_COMM_0, receive_buffer[i], &msg, &status)) {
@@ -361,6 +395,18 @@ int main()
             state.home_set    = true;
             logger::line("[gps] home altitude set: %.1f m MSL",
                          state.home_alt_mm / 1000.0);
+        }
+        if (state.qgc_known && state.current_fix.valid != prev_gps_valid) {
+            if (state.current_fix.valid) {
+                char stxt[64];
+                std::snprintf(stxt, sizeof(stxt), "GPS fix: %u sats, HDOP %.1f",
+                              state.current_fix.satellites,
+                              state.current_fix.hdop_100 / 100.0);
+                mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
+            } else {
+                mav.send_statustext(state, MAV_SEVERITY_WARNING, "GPS fix lost");
+            }
+            prev_gps_valid = state.current_fix.valid;
         }
 
         uint64_t now = micros();

@@ -2,6 +2,11 @@ CXX      = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra
 INC      = -Isrc -Iinclude -Iexternal/mavlink
 
+# Git version info — surfaced to QGC UI via STATUSTEXT banner on first connect.
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)
+GIT_SHA    := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+CXXFLAGS  += -DGIT_BRANCH=\"$(GIT_BRANCH)\" -DGIT_SHA=\"$(GIT_SHA)\"
+
 # ARCH=host (default, x86, native g++) or ARCH=rpi (cross-compile for RPi Zero 2W)
 ARCH    ?= host
 ifeq ($(ARCH),rpi)

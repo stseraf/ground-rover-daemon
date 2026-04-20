@@ -9,6 +9,7 @@ namespace Config {
     constexpr uint16_t UDP_BIND_PORT         = 14550;
     constexpr uint64_t HEARTBEAT_INTERVAL_US  = 1'000'000;
     constexpr uint64_t GST_MONITOR_INTERVAL_US = 3'000'000;  // 3 s
+    constexpr uint64_t QGC_RECONNECT_GAP_US  = 5'000'000;    // 5 s silence → treat next packet as reconnect
     constexpr uint64_t LOOP_SLEEP_US         = 1'000;
 
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
