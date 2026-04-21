@@ -62,6 +62,21 @@ ParamStore::ParamStore()
     params_[38] = {"COMPASS_OFS3_Z",   0.0f};
     params_[39] = {"COMPASS_DEC",      0.0f};
     params_[40] = {"AHRS_ORIENTATION", 0.0f};
+    // RC channel calibration stubs — QGC Summary page probes RC1..RC4
+    // MIN/MAX/TRIM and popups "Parameters are missing from firmware" if any
+    // are absent. Values are standard ArduPilot defaults (1100/1900/1500).
+    params_[41] = {"RC1_MIN",  1100.0f};
+    params_[42] = {"RC1_MAX",  1900.0f};
+    params_[43] = {"RC1_TRIM", 1500.0f};
+    params_[44] = {"RC2_MIN",  1100.0f};
+    params_[45] = {"RC2_MAX",  1900.0f};
+    params_[46] = {"RC2_TRIM", 1500.0f};
+    params_[47] = {"RC3_MIN",  1100.0f};
+    params_[48] = {"RC3_MAX",  1900.0f};
+    params_[49] = {"RC3_TRIM", 1500.0f};
+    params_[50] = {"RC4_MIN",  1100.0f};
+    params_[51] = {"RC4_MAX",  1900.0f};
+    params_[52] = {"RC4_TRIM", 1500.0f};
     load(Config::PARAM_FILE);
 }
 
