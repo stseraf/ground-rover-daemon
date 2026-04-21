@@ -67,10 +67,18 @@ void handle_request_message(MavSender& mav, RoverState& state,
 void handle_set_mode(MavSender& mav, RoverState& state,
                      const mavlink_command_long_t* cmd)
 {
+    uint8_t  base_mode   = static_cast<uint8_t>(cmd->param1);
+    uint32_t custom_mode = static_cast<uint32_t>(cmd->param2);
     logger::line("rx: MAVLINK_MSG_ID_COMMAND_LONG(76): MAV_CMD_DO_SET_MODE(176): base_mode=0x%02X custom_mode=%u",
-                 static_cast<uint32_t>(cmd->param1), static_cast<uint32_t>(cmd->param2));
-    state.base_mode   = static_cast<uint8_t>(cmd->param1);
-    state.custom_mode = static_cast<uint32_t>(cmd->param2);
+                 base_mode, custom_mode);
+    if (!rover_mode_supported(custom_mode)) {
+        logger::line("    DENIED: ROVER_MODE %u not implemented", custom_mode);
+        mav.send_command_ack(state, cmd->command, MAV_RESULT_DENIED,
+                             cmd->target_system, cmd->target_component);
+        return;
+    }
+    state.base_mode   = base_mode;
+    state.custom_mode = custom_mode;
     mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
                          cmd->target_system, cmd->target_component);
     mav.send_current_mode(state);

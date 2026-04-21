@@ -19,6 +19,17 @@ ParamStore::ParamStore()
     params_[6] = {"VIDEO_FPS",       30.0f};
     params_[7] = {"NET_LINK_PREF",   0.0f};  // 0=auto, 1=WiFi-prefer, 2=LTE-force
     params_[8] = {"NET_LOG_STEP_MB", 10.0f}; // 0=disabled; MB between session-traffic logs
+    // Tier-A ArduRover stub params — QGC's ArduRover plugin looks these up on
+    // connect; without them some Vehicle Setup pages print "missing param"
+    // warnings. Values chosen to cleanly *disable* the corresponding subsystem
+    // (BATT_MONITOR=0, ARMING_CHECK=0, COMPASS_ENABLE=0) so QGC suppresses the
+    // related UI rather than showing broken panels. Daemon does not act on
+    // these values — they are purely cosmetic for QGC.
+    params_[9]  = {"SYSID_THISMAV",  1.0f};  // must match HEARTBEAT.sysid
+    params_[10] = {"FRAME_CLASS",    1.0f};  // 1 = Rover undefined
+    params_[11] = {"BATT_MONITOR",   0.0f};  // 0 = disabled (no battery monitor)
+    params_[12] = {"ARMING_CHECK",   0.0f};  // 0 = all pre-arm checks bypassed
+    params_[13] = {"COMPASS_ENABLE", 0.0f};  // 0 = no compass
     load(Config::PARAM_FILE);
 }
 

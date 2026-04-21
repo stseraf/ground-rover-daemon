@@ -243,8 +243,12 @@ int main()
                             mavlink_set_mode_t sm;
                             mavlink_msg_set_mode_decode(&msg, &sm);
                             logger::line("rx: MAVLINK_MSG_ID_SET_MODE(11): base=0x%02X custom=%u", sm.base_mode, sm.custom_mode);
-                            state.base_mode   = sm.base_mode;
-                            state.custom_mode = sm.custom_mode;
+                            if (rover_mode_supported(sm.custom_mode)) {
+                                state.base_mode   = sm.base_mode;
+                                state.custom_mode = sm.custom_mode;
+                            } else {
+                                logger::line("    IGNORED: ROVER_MODE %u not implemented", sm.custom_mode);
+                            }
                             break;
                         }
                         case MAVLINK_MSG_ID_MANUAL_CONTROL: {
@@ -351,9 +355,11 @@ int main()
                         case MAVLINK_MSG_ID_MISSION_REQUEST_LIST: {
                             mavlink_mission_request_list_t mrl;
                             mavlink_msg_mission_request_list_decode(&msg, &mrl);
-                            logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u", mrl.target_system, mrl.target_component);
-                            //std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
-                            mav.send_mission_count(state, mrl.target_system, mrl.target_component);
+                            logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u type=%u",
+                                mrl.target_system, mrl.target_component, mrl.mission_type);
+                            // ArduRover clients poll MISSION, FENCE, and RALLY — answer count=0 for all three
+                            mav.send_mission_count(state, mrl.target_system, mrl.target_component,
+                                                   mrl.mission_type);
                             break;
                         }
                         case MAVLINK_MSG_ID_MISSION_ACK: {

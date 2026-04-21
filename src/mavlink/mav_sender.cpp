@@ -17,7 +17,7 @@ void MavSender::send_heartbeat(const RoverState& state)
     mavlink_message_t msg;
     uint8_t base_mode = static_cast<uint8_t>(state.base_mode | (state.armed ? MAV_MODE_FLAG_SAFETY_ARMED : 0));
     mavlink_msg_heartbeat_pack(sys_id_, comp_id_, &msg,
-        MAV_TYPE_GROUND_ROVER, MAV_AUTOPILOT_GENERIC,
+        MAV_TYPE_GROUND_ROVER, MAV_AUTOPILOT_ARDUPILOTMEGA,
         base_mode, state.custom_mode, MAV_STATE_ACTIVE);
     send(msg, state);
 }
@@ -39,9 +39,16 @@ void MavSender::send_autopilot_version(const RoverState& state)
     mavlink_message_t msg;
     mavlink_autopilot_version_t av{};
     av.capabilities =
-        MAV_PROTOCOL_CAPABILITY_MISSION_INT
+        MAV_PROTOCOL_CAPABILITY_MISSION_FLOAT
+      | MAV_PROTOCOL_CAPABILITY_PARAM_FLOAT
+      | MAV_PROTOCOL_CAPABILITY_MISSION_INT
       | MAV_PROTOCOL_CAPABILITY_COMMAND_INT
+      | MAV_PROTOCOL_CAPABILITY_MISSION_FENCE
+      | MAV_PROTOCOL_CAPABILITY_MISSION_RALLY
       | MAV_PROTOCOL_CAPABILITY_MAVLINK2;
+    // ArduRover 4.5.0 OFFICIAL — encoded per AP_FWVersion convention
+    av.flight_sw_version = (4u << 24) | (5u << 16) | (0u << 8) | FIRMWARE_VERSION_TYPE_OFFICIAL;
+    av.vendor_id         = 0x4141;  // 'AA' — ArduPilot convention
     mavlink_msg_autopilot_version_encode(sys_id_, comp_id_, &msg, &av);
     logger::line("tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX",
                  (unsigned long long)av.capabilities);
@@ -115,12 +122,13 @@ void MavSender::send_command_ack(const RoverState& state, uint16_t command, uint
 }
 
 void MavSender::send_mission_count(const RoverState& state,
-                                    uint8_t target_system, uint8_t target_component)
+                                    uint8_t target_system, uint8_t target_component,
+                                    uint8_t mission_type)
 {
     mavlink_message_t msg;
     mavlink_msg_mission_count_pack(sys_id_, comp_id_, &msg,
-        target_system, target_component, 0, MAV_MISSION_TYPE_MISSION, 0);
-    logger::line("tx: MAVLINK_MSG_ID_MISSION_COUNT(44): %u", 0);
+        target_system, target_component, 0, mission_type, 0);
+    logger::line("tx: MAVLINK_MSG_ID_MISSION_COUNT(44): count=0 type=%u", mission_type);
     send(msg, state);
 }
 

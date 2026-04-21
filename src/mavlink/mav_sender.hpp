@@ -25,7 +25,8 @@ public:
     void send_command_ack(const RoverState& state, uint16_t command, uint8_t result,
                           uint8_t target_system, uint8_t target_component);
     void send_mission_count(const RoverState& state,
-                            uint8_t target_system, uint8_t target_component);
+                            uint8_t target_system, uint8_t target_component,
+                            uint8_t mission_type);
     void send_servo_output_raw(const RoverState& state, int16_t left, int16_t right);
     void send_param(const RoverState& state, const char* name, float value,
                     uint16_t index, uint16_t total);
