@@ -46,8 +46,10 @@ void MavSender::send_autopilot_version(const RoverState& state)
       | MAV_PROTOCOL_CAPABILITY_MISSION_FENCE
       | MAV_PROTOCOL_CAPABILITY_MISSION_RALLY
       | MAV_PROTOCOL_CAPABILITY_MAVLINK2;
-    // ArduRover 4.5.0 OFFICIAL — encoded per AP_FWVersion convention
-    av.flight_sw_version = (4u << 24) | (5u << 16) | (0u << 8) | FIRMWARE_VERSION_TYPE_OFFICIAL;
+    // ArduRover 4.6.3 OFFICIAL — encoded per AP_FWVersion convention.
+    // Tracks the "latest stable" baked into QGC so it doesn't pop up the
+    // "Vehicle is not running latest stable firmware" warning on connect.
+    av.flight_sw_version = (4u << 24) | (6u << 16) | (3u << 8) | FIRMWARE_VERSION_TYPE_OFFICIAL;
     av.vendor_id         = 0x4141;  // 'AA' — ArduPilot convention
     mavlink_msg_autopilot_version_encode(sys_id_, comp_id_, &msg, &av);
     logger::line("tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX",
@@ -72,9 +74,10 @@ void MavSender::send_current_mode(const RoverState& state)
     mavlink_current_mode_t cm{};
     cm.custom_mode          = state.custom_mode;
     cm.intended_custom_mode = state.custom_mode;
-    cm.standard_mode        = (state.custom_mode == 4)
-                              ? MAV_STANDARD_MODE_POSITION_HOLD
-                              : MAV_STANDARD_MODE_NON_STANDARD;
+    // Both modes report NON_STANDARD so QGC renders our mode_name ("HOLD" /
+    // "MANUAL") instead of substituting its own "Position" label for the
+    // POSITION_HOLD standard-mode code.
+    cm.standard_mode        = MAV_STANDARD_MODE_NON_STANDARD;
     mavlink_message_t msg;
     mavlink_msg_current_mode_encode(sys_id_, comp_id_, &msg, &cm);
     send(msg, state);
@@ -89,8 +92,8 @@ void MavSender::send_available_modes(const RoverState& state, uint32_t mode)
         uint32_t    properties;
     };
     constexpr std::array<ModeInfo, 2> modes{{
-        { "HOLD",   MAV_STANDARD_MODE_POSITION_HOLD, 4, 0 },
-        { "MANUAL", MAV_STANDARD_MODE_NON_STANDARD,  0, 0 }
+        { "HOLD",   MAV_STANDARD_MODE_NON_STANDARD, 4, 0 },
+        { "MANUAL", MAV_STANDARD_MODE_NON_STANDARD, 0, 0 }
     }};
     constexpr uint8_t number_modes = static_cast<uint8_t>(modes.size());
 

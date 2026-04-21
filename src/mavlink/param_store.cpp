@@ -30,6 +30,38 @@ ParamStore::ParamStore()
     params_[11] = {"BATT_MONITOR",   0.0f};  // 0 = disabled (no battery monitor)
     params_[12] = {"ARMING_CHECK",   0.0f};  // 0 = all pre-arm checks bypassed
     params_[13] = {"COMPASS_ENABLE", 0.0f};  // 0 = no compass
+    // Tier-B ArduRover stub params — required to silence QGC's per-page
+    // "Parameters are missing from firmware" popup on Summary and Compass
+    // pages. Values chosen to be inert (zero offsets / default mappings) so
+    // QGC treats hardware as "present but uncalibrated/disabled" rather than
+    // throwing parameter-lookup errors. Daemon does not act on these.
+    params_[14] = {"RCMAP_ROLL",       1.0f};
+    params_[15] = {"RCMAP_PITCH",      2.0f};
+    params_[16] = {"RCMAP_THROTTLE",   3.0f};
+    params_[17] = {"RCMAP_YAW",        4.0f};
+    params_[18] = {"COMPASS_DEV_ID",   0.0f};
+    params_[19] = {"COMPASS_DEV_ID2",  0.0f};
+    params_[20] = {"COMPASS_DEV_ID3",  0.0f};
+    params_[21] = {"INS_ACCOFFS_X",    0.0f};
+    params_[22] = {"INS_ACCOFFS_Y",    0.0f};
+    params_[23] = {"INS_ACCOFFS_Z",    0.0f};
+    params_[24] = {"FLTMODE1",         0.0f};
+    params_[25] = {"FLTMODE2",         0.0f};
+    params_[26] = {"FLTMODE3",         0.0f};
+    params_[27] = {"FLTMODE4",         0.0f};
+    params_[28] = {"FLTMODE5",         0.0f};
+    params_[29] = {"FLTMODE6",         0.0f};
+    params_[30] = {"COMPASS_OFS_X",    0.0f};
+    params_[31] = {"COMPASS_OFS_Y",    0.0f};
+    params_[32] = {"COMPASS_OFS_Z",    0.0f};
+    params_[33] = {"COMPASS_OFS2_X",   0.0f};
+    params_[34] = {"COMPASS_OFS2_Y",   0.0f};
+    params_[35] = {"COMPASS_OFS2_Z",   0.0f};
+    params_[36] = {"COMPASS_OFS3_X",   0.0f};
+    params_[37] = {"COMPASS_OFS3_Y",   0.0f};
+    params_[38] = {"COMPASS_OFS3_Z",   0.0f};
+    params_[39] = {"COMPASS_DEC",      0.0f};
+    params_[40] = {"AHRS_ORIENTATION", 0.0f};
     load(Config::PARAM_FILE);
 }
 
