@@ -77,6 +77,14 @@ ParamStore::ParamStore()
     params_[50] = {"RC4_MIN",  1100.0f};
     params_[51] = {"RC4_MAX",  1900.0f};
     params_[52] = {"RC4_TRIM", 1500.0f};
+    // Per-panel stubs named in QGC's "missing params" popup on Radio and
+    // Sensors/Accelerometer pages. RCx_REV=1 means channel not reversed;
+    // COMPASS_AUTODEC=1 is ArduPilot's default (enabled). Daemon ignores both.
+    params_[53] = {"RC1_REV",         1.0f};
+    params_[54] = {"RC2_REV",         1.0f};
+    params_[55] = {"RC3_REV",         1.0f};
+    params_[56] = {"RC4_REV",         1.0f};
+    params_[57] = {"COMPASS_AUTODEC", 1.0f};
     load(Config::PARAM_FILE);
 }
 
