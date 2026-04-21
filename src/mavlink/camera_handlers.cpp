@@ -34,17 +34,15 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
     mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                              cmd->target_system, cmd->target_component);
 
-    logger::line("rx: camera REQUEST_MESSAGE(%u) cam=%d", msg_id, cam_idx);
-
+    // Expected polls (CAMERA_INFORMATION, VIDEO_STREAM_INFORMATION, ...) are
+    // sent back via mav_sender, which logs there. We only log at this layer
+    // when the msg_id falls into the default / unsupported case.
     switch (msg_id) {
         case MAVLINK_MSG_ID_CAMERA_INFORMATION:
-            logger::line("tx: CAMERA_INFORMATION(259) cam=%d", cam_idx);
             mav.send_camera_information(cc, state, cam);
             break;
 
         case MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION:
-            logger::line("tx: VIDEO_STREAM_INFORMATION(269) cam=%d %zu stream(s)",
-                         cam_idx, cam.modes.size());
             for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
                 mav.send_video_stream_information(cc, state, cam, cam_idx, i);
             break;
@@ -52,13 +50,10 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
         case MAVLINK_MSG_ID_VIDEO_STREAM_STATUS: {
             auto stream_id = static_cast<uint8_t>(cmd->param2);
             if (stream_id == 0) {
-                // All streams
-                logger::line("tx: VIDEO_STREAM_STATUS(270) cam=%d all streams", cam_idx);
                 for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
                     mav.send_video_stream_status(cc, state, cam, cam_idx,
                                                   static_cast<uint8_t>(i + 1));
             } else {
-                logger::line("tx: VIDEO_STREAM_STATUS(270) cam=%d stream=%u", cam_idx, stream_id);
                 mav.send_video_stream_status(cc, state, cam, cam_idx, stream_id);
             }
             break;
@@ -75,7 +70,8 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
             break;
 
         default:
-            logger::line("tx: camera REQUEST_MESSAGE(%u) unsupported", msg_id);
+            logger::line("rx: camera REQUEST_MESSAGE(%u) cam=%d — unsupported",
+                         msg_id, cam_idx);
             break;
     }
 }

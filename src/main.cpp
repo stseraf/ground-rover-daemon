@@ -333,13 +333,16 @@ int main()
                                 handle_command_long(mav, state, &cmd);
                             break;
                         }
-                        case MAVLINK_MSG_ID_REQUEST_DATA_STREAM: {
-                            mavlink_request_data_stream_t rds;
-                            mavlink_msg_request_data_stream_decode(&msg, &rds);
-                            logger::line("rx: MAVLINK_MSG_ID_REQUEST_DATA_STREAM(66): req_stream_id=%u req_message_rate=%u start_stop=%u",
-                                rds.req_stream_id, rds.req_message_rate, rds.start_stop);
+                        case MAVLINK_MSG_ID_REQUEST_DATA_STREAM:
+                            // Deprecated MAVLink 1 subscription. QGC polls it
+                            // ~twice a second; we publish the equivalent streams
+                            // unconditionally (heartbeat, SYS_STATUS, GPS, etc.)
+                            // so this is a silent no-op.
                             break;
-                        }
+                        case MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL:
+                            // QGC probes @PARAM/param.pck at ~6s cadence. No FTP
+                            // stub yet — silently drop so the log stays quiet.
+                            break;
                         case MAVLINK_MSG_ID_DATA_STREAM: {
                             mavlink_data_stream_t ds;
                             mavlink_msg_data_stream_decode(&msg, &ds);

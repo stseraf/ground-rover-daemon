@@ -112,6 +112,7 @@ void handle_command_long(MavSender& mav, RoverState& state,
         case MAV_CMD_REQUEST_CAMERA_INFORMATION: // deprecated, misdirected to autopilot
         case MAV_CMD_SET_CAMERA_ZOOM:
         case MAV_CMD_SET_CAMERA_FOCUS:
+        case MAV_CMD_SET_MESSAGE_INTERVAL: // 511 — QGC throttling hint, polled often
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
                                  cmd->target_system, cmd->target_component);
             break;
