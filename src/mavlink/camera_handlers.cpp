@@ -24,10 +24,13 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
     uint8_t  cc          = cam_comp(cam_idx);
     const CameraInfo& cam = state.cameras[cam_idx];
 
-    // Silently reject polled-but-unsupported messages
+    // GIMBAL_MANAGER_INFORMATION: QGC probes every camera component for one.
+    // Reply ACCEPTED + "no gimbal" stub so GimbalController stops its 6×
+    // retry loop at connect.
     if (msg_id == MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION) {
-        mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_UNSUPPORTED,
+        mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                  cmd->target_system, cmd->target_component);
+        mav.send_gimbal_manager_information(state, cc);
         return;
     }
 

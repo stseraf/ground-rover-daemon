@@ -34,6 +34,11 @@ public:
     void send_global_position_int(const RoverState& state);
     void send_radio_status(const RoverState& state);
     void send_statustext(const RoverState& state, uint8_t severity, const char* text);
+    // "No gimbal" stub — replies to MAV_CMD_REQUEST_MESSAGE(280) polling on
+    // either the autopilot (default comp) or a camera component. Prevents
+    // QGC's GimbalController from retrying 6× at connect.
+    void send_gimbal_manager_information(const RoverState& state,
+                                          uint8_t from_comp_id);
 
     // Camera component messages — all take cam_comp_id (MAV_COMP_ID_CAMERA + i)
     void send_camera_heartbeat(uint8_t cam_comp_id, const RoverState& state);

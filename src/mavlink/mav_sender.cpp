@@ -389,6 +389,21 @@ void MavSender::send_radio_status(const RoverState& state)
     send(msg, state);
 }
 
+void MavSender::send_gimbal_manager_information(const RoverState& state,
+                                                  uint8_t from_comp_id)
+{
+    mavlink_gimbal_manager_information_t gmi{};
+    struct timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    gmi.time_boot_ms     = static_cast<uint32_t>(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    gmi.cap_flags        = 0;  // no axis control, no lock, no retract — nothing
+    gmi.gimbal_device_id = 0;  // no associated device → "standalone, empty" manager
+    // All angle ranges left at 0 (default) so QGC shows no control affordance.
+    mavlink_message_t msg;
+    mavlink_msg_gimbal_manager_information_encode(sys_id_, from_comp_id, &msg, &gmi);
+    send(msg, state);
+}
+
 void MavSender::send_statustext(const RoverState& state, uint8_t severity, const char* text)
 {
     mavlink_message_t msg;

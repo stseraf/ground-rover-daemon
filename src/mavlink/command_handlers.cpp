@@ -25,9 +25,17 @@ void handle_request_message(MavSender& mav, RoverState& state,
 {
     auto msg_id = static_cast<uint32_t>(cmd->param1);
 
-    // Silent ACK for known-unsupported IDs — no log to avoid terminal spam
+    // GIMBAL_MANAGER_INFORMATION: QGC retries 6× if UNSUPPORTED. Reply
+    // ACCEPTED and emit a "no gimbal" stub so QGC stops asking.
+    if (msg_id == MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION) {
+        mav.send_command_ack(state, cmd->command, MAV_RESULT_ACCEPTED,
+                             cmd->target_system, cmd->target_component);
+        mav.send_gimbal_manager_information(state, 1); // comp 1 = autopilot
+        return;
+    }
+    // COMPONENT_INFORMATION / METADATA are one-shots in QGC — UNSUPPORTED
+    // is fine and doesn't drive retry loops.
     switch (msg_id) {
-        case MAVLINK_MSG_ID_GIMBAL_MANAGER_INFORMATION: // 280 — polled ~1 Hz by QGC
         case MAVLINK_MSG_ID_COMPONENT_INFORMATION:      // 395
         case MAVLINK_MSG_ID_COMPONENT_METADATA:         // 397
             mav.send_command_ack(state, cmd->command, MAV_RESULT_UNSUPPORTED,
