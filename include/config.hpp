@@ -8,9 +8,14 @@ namespace Config {
 
     constexpr uint16_t UDP_BIND_PORT         = 14550;
     constexpr uint64_t HEARTBEAT_INTERVAL_US  = 1'000'000;
-    constexpr uint64_t GST_MONITOR_INTERVAL_US = 3'000'000;  // 3 s
     constexpr uint64_t QGC_RECONNECT_GAP_US  = 5'000'000;    // 5 s silence → treat next packet as reconnect
     constexpr uint64_t LOOP_SLEEP_US         = 1'000;
+
+    // Embedded RTSP video server.
+    // Clients pull: rtsp://<rover>:8554/stream. Pipeline only runs while at
+    // least one client is connected, so no capture/LTE cost when idle.
+    constexpr uint16_t    RTSP_PORT  = 8554;
+    constexpr const char* RTSP_MOUNT = "/stream";
 
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
     constexpr int16_t  DRIVE_DEAD_ZONE       = 30;
@@ -56,7 +61,6 @@ namespace Config {
     }
 
     constexpr const char* PARAM_FILE  = "params";  // relative to WorkingDirectory
-    constexpr const char* QGC_IP_FILE = "qgc_ip";  // optional override: one IP per line
 
     // USB LTE modem (Qualcomm 05c6:90b6, enumerates as usb0)
     namespace Lte {

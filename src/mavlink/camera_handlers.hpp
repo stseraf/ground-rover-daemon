@@ -18,11 +18,8 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
 
 // Handle COMMAND_LONGs targeted at camera component cam_idx.
 // Includes: MAV_CMD_REQUEST_MESSAGE, start/stop streaming, deprecated camera cmds.
-// state is non-const because start/stop streaming mutates active stream fields.
-void handle_camera_command_long(MavSender& mav, RoverState& state,
+// Video delivery is via the embedded RTSP server (pull model), so start/stop
+// are accepted but have no side effects on the pipeline.
+void handle_camera_command_long(MavSender& mav, const RoverState& state,
                                 const mavlink_command_long_t* cmd,
                                 int cam_idx);
-
-// Periodic liveness check — call every Config::GST_MONITOR_INTERVAL_US from the main loop.
-// Checks whether active_gst_pid is still alive and applies the retry/fallback policy on death.
-void gst_monitor_tick(MavSender& mav, RoverState& state, uint64_t now);

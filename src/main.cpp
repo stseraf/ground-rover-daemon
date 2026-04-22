@@ -16,7 +16,7 @@
 #include "mavlink/command_handlers.hpp"
 #include "mavlink/camera_handlers.hpp"
 #include "camera/camera_discovery.hpp"
-#include "camera/gst_pipeline.hpp"
+#include "video/rtsp_server.hpp"
 #include "drive/diff_drive.hpp"
 #include "motor/uart_motor_driver.hpp"
 #ifdef DRIVER_TB6612
@@ -52,38 +52,6 @@ static uint64_t micros()
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000ULL + static_cast<uint64_t>(ts.tv_nsec) / 1000;
-}
-
-static void stop_stream(RoverState& state)
-{
-    if (state.active_gst_pid <= 0) return;
-    gst_kill(state.active_gst_pid);
-    state.active_gst_pid  = -1;
-    state.active_cam_idx  = -1;
-    state.active_mode_idx = -1;
-    state.gst_retry_count = 0;
-    state.gst_gave_up     = false;
-    logger::line("[gst] stream stopped");
-}
-
-static void autostart_stream(RoverState& state)
-{
-    if (state.cameras.empty() || state.cameras[0].modes.empty()) return;
-    if (state.active_gst_pid > 0) return;
-    const CameraInfo& cam  = state.cameras[0];
-    const SensorMode& mode = cam.modes[0];
-    int fps     = static_cast<int>(state.video_fps);
-    int max_fps = static_cast<int>(mode.fps);
-    if (fps > max_fps) fps = max_fps;
-    state.active_gst_pid = gst_spawn(mode.width, mode.height, fps,
-                                      state.video_bitrate_bps, state.qgc_ip);
-    if (state.active_gst_pid > 0) {
-        state.active_cam_idx  = 0;
-        state.active_mode_idx = 0;
-        state.gst_retry_count = 0;
-        state.gst_gave_up     = false;
-        logger::line("[gst] autostart: %s", mode.name);
-    }
 }
 
 int main()
@@ -133,27 +101,26 @@ int main()
     state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
     state.video_fps         = static_cast<uint32_t>(params.get(6));
 
-    // Optional QGC IP override (useful when modem NATs all traffic through gateway)
-    {
-        FILE* f = std::fopen(Config::QGC_IP_FILE, "r");
-        if (f) {
-            char override_ip[INET6_ADDRSTRLEN];
-            if (std::fscanf(f, "%46s", override_ip) == 1) {
-                std::memcpy(state.qgc_ip, override_ip, sizeof(state.qgc_ip));
-                state.qgc_ip_known = true;
-                logger::line("[video] QGC IP from config: %s", state.qgc_ip);
-            }
-            std::fclose(f);
-        }
+    // Embedded RTSP server — clients pull from rtsp://<rover>:8554/stream.
+    // Pipeline runs only while at least one client is connected; idle cost
+    // is a listening socket.
+    RtspServer rtsp;
+    if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
+        const SensorMode& mode = state.cameras[0].modes[0];
+        int fps     = static_cast<int>(state.video_fps);
+        int max_fps = static_cast<int>(mode.fps);
+        if (fps > max_fps) fps = max_fps;
+        rtsp.start(Config::RTSP_PORT, Config::RTSP_MOUNT,
+                   mode.width, mode.height, fps,
+                   state.video_bitrate_bps);
+    } else {
+        logger::line("[rtsp] no camera detected — server not started");
     }
-    if (state.qgc_ip_known)
-        autostart_stream(state);
 
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
     uint64_t last_hb           = 0;
     uint64_t last_lte_poll     = 0;
-    uint64_t last_gst_monitor  = 0;
     bool     mc_timeout_active = false;
     uint64_t last_slew_tick_us = 0;
     bool     prev_armed        = false;
@@ -188,7 +155,6 @@ int main()
                          static_cast<unsigned long long>(
                              (micros() - last_qgc_packet_us) / 1'000'000ULL));
             state.qgc_known = false;
-            stop_stream(state);
         }
 
         uint8_t receive_buffer[2048];
@@ -200,31 +166,22 @@ int main()
                 banner_sent    = false;
                 prev_gps_valid = false;
                 prev_uplink[0] = '\0';
-                autostart_stream(state);
             }
             last_qgc_packet_us = micros();
             state.qgc_known = true;
-            if (!state.qgc_ip_known) {
-                inet_ntop(AF_INET, &state.qgc_addr.sin_addr,
-                          state.qgc_ip, sizeof(state.qgc_ip));
-                state.qgc_ip_known = true;
-                logger::line("[video] QGC IP: %s", state.qgc_ip);
-                autostart_stream(state);
-            }
             if (!banner_sent) {
                 char banner[64];
                 std::snprintf(banner, sizeof(banner), "Rover %s@%s", GIT_BRANCH, GIT_SHA);
                 mav.send_statustext(state, MAV_SEVERITY_INFO, banner);
-                if (state.active_gst_pid > 0 &&
-                    state.active_cam_idx >= 0 && state.active_mode_idx >= 0) {
-                    const SensorMode& m =
-                        state.cameras[state.active_cam_idx].modes[state.active_mode_idx];
+                if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
+                    const SensorMode& m = state.cameras[0].modes[0];
                     int fps     = static_cast<int>(state.video_fps);
                     int max_fps = static_cast<int>(m.fps);
                     if (fps > max_fps) fps = max_fps;
                     char stxt[64];
                     std::snprintf(stxt, sizeof(stxt),
-                                  "Stream autostart: %ux%u %d/%dfps %ukbps",
+                                  "RTSP :%u%s — %ux%u %d/%dfps %ukbps",
+                                  Config::RTSP_PORT, Config::RTSP_MOUNT,
                                   m.width, m.height, fps, max_fps,
                                   state.video_bitrate_bps / 1000);
                     mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
@@ -613,11 +570,6 @@ int main()
             state.lte_was_connected = state.lte.connected;
         }
 
-        if (now - last_gst_monitor > Config::GST_MONITOR_INTERVAL_US) {
-            last_gst_monitor = now;
-            gst_monitor_tick(mav, state, now);
-        }
-
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
@@ -633,9 +585,5 @@ int main()
         }
     }
 
-    // Clean shutdown: kill gstreamer if still running
-    if (state.active_gst_pid > 0) {
-        logger::line("[gst] shutdown — stopping stream PID %d", state.active_gst_pid);
-        gst_kill(state.active_gst_pid);
-    }
+    rtsp.stop();
 }
