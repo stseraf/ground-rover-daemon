@@ -146,8 +146,9 @@ int main()
             std::fclose(f);
         }
     }
-    if (state.qgc_ip_known)
-        autostart_stream(state);
+    // Defer stream autostart until first QGC packet. With qgc_ip_known from
+    // config but no GCS actually listening, starting now would bleed LTE
+    // traffic indefinitely (loss-detect requires a prior packet to arm).
 
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -195,12 +196,18 @@ int main()
         ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
                               state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
-            if (!state.qgc_known && last_qgc_packet_us != 0) {
-                logger::line("[qgc] reconnected — re-arming status messages");
-                banner_sent    = false;
-                prev_gps_valid = false;
-                prev_uplink[0] = '\0';
-                autostart_stream(state);
+            if (!state.qgc_known) {
+                if (last_qgc_packet_us != 0) {
+                    logger::line("[qgc] reconnected — re-arming status messages");
+                    banner_sent    = false;
+                    prev_gps_valid = false;
+                    prev_uplink[0] = '\0';
+                }
+                // First contact this session (fresh boot or reconnect).
+                // Start the stream now if we already have an IP from config;
+                // the learned-IP branch below covers the discover-on-packet case.
+                if (state.qgc_ip_known)
+                    autostart_stream(state);
             }
             last_qgc_packet_us = micros();
             state.qgc_known = true;
