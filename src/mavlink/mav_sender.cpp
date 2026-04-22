@@ -404,6 +404,34 @@ void MavSender::send_gimbal_manager_information(const RoverState& state,
     send(msg, state);
 }
 
+void MavSender::send_ftp_nak(const RoverState& state,
+                              uint8_t target_system, uint8_t target_component,
+                              uint16_t req_seq, uint8_t session,
+                              uint8_t req_opcode, uint8_t error_code)
+{
+    // Payload header layout (per MAVLink FTP spec):
+    //   [0..1] seq   [2] session   [3] opcode   [4] size
+    //   [5] req_opcode   [6] burst_complete   [7] pad
+    //   [8..11] offset   [12..] data
+    mavlink_file_transfer_protocol_t ftp{};
+    ftp.target_network   = 0;
+    ftp.target_system    = target_system;
+    ftp.target_component = target_component;
+
+    uint16_t seq = static_cast<uint16_t>(req_seq + 1);
+    ftp.payload[0]  = static_cast<uint8_t>(seq & 0xFF);
+    ftp.payload[1]  = static_cast<uint8_t>((seq >> 8) & 0xFF);
+    ftp.payload[2]  = session;
+    ftp.payload[3]  = 129;            // NAK
+    ftp.payload[4]  = 1;               // size: one byte of data (error code)
+    ftp.payload[5]  = req_opcode;
+    ftp.payload[12] = error_code;
+
+    mavlink_message_t msg;
+    mavlink_msg_file_transfer_protocol_encode(sys_id_, comp_id_, &msg, &ftp);
+    send(msg, state);
+}
+
 void MavSender::send_statustext(const RoverState& state, uint8_t severity, const char* text)
 {
     mavlink_message_t msg;

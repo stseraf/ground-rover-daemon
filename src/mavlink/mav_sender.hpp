@@ -40,6 +40,14 @@ public:
     void send_gimbal_manager_information(const RoverState& state,
                                           uint8_t from_comp_id);
 
+    // MAVLink FTP NAK. QGC probes @PARAM/param.pck on connect; without a
+    // reply it retries ~6s × 2 before falling back to PARAM_REQUEST_LIST.
+    // NAK with FileNotFound(10) makes it fall back in ~100ms.
+    void send_ftp_nak(const RoverState& state,
+                      uint8_t target_system, uint8_t target_component,
+                      uint16_t req_seq, uint8_t session,
+                      uint8_t req_opcode, uint8_t error_code);
+
     // Camera component messages — all take cam_comp_id (MAV_COMP_ID_CAMERA + i)
     void send_camera_heartbeat(uint8_t cam_comp_id, const RoverState& state);
     void send_camera_information(uint8_t cam_comp_id, const RoverState& state,

@@ -339,10 +339,40 @@ int main()
                             // unconditionally (heartbeat, SYS_STATUS, GPS, etc.)
                             // so this is a silent no-op.
                             break;
-                        case MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL:
-                            // QGC probes @PARAM/param.pck at ~6s cadence. No FTP
-                            // stub yet — silently drop so the log stays quiet.
+                        case MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL: {
+                            // Payload layout: seq(2) session(1) opcode(1) size(1)
+                            // req_opcode(1) burst_complete(1) pad(1) offset(4) data(239).
+                            mavlink_file_transfer_protocol_t ftp;
+                            mavlink_msg_file_transfer_protocol_decode(&msg, &ftp);
+                            const uint8_t* p = ftp.payload;
+                            uint16_t seq     = static_cast<uint16_t>(p[0] | (p[1] << 8));
+                            uint8_t  session = p[2];
+                            uint8_t  opcode  = p[3];
+                            uint8_t  size    = p[4];
+                            const char* opname;
+                            switch (opcode) {
+                                case 3:  opname = "ListDirectory"; break;
+                                case 4:  opname = "OpenFileRO"; break;
+                                case 5:  opname = "ReadFile"; break;
+                                case 14: opname = "CalcFileCRC32"; break;
+                                case 15: opname = "BurstReadFile"; break;
+                                default: opname = "?"; break;
+                            }
+                            char name[64] = {0};
+                            uint8_t n = size < sizeof(name) - 1 ? size : sizeof(name) - 1;
+                            for (uint8_t i = 0; i < n; ++i) {
+                                uint8_t c = p[12 + i];
+                                name[i] = (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.';
+                            }
+                            logger::line("rx: MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL(110): opcode=%u(%s) data=\"%s\"",
+                                         opcode, opname, name);
+                            // NAK with FileNotFound(10) so QGC abandons FTP and
+                            // falls back to PARAM_REQUEST_LIST in ~6ms instead
+                            // of timing out for ~12s.
+                            mav.send_ftp_nak(state, msg.sysid, msg.compid,
+                                             seq, session, opcode, /*FileNotFound=*/10);
                             break;
+                        }
                         case MAVLINK_MSG_ID_DATA_STREAM: {
                             mavlink_data_stream_t ds;
                             mavlink_msg_data_stream_decode(&msg, &ds);
