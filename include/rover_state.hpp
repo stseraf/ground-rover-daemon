@@ -14,10 +14,21 @@
 #include "lte_status.hpp"
 #include "camera_info.hpp"
 
+// ArduRover ROVER_MODE enum values (from ardupilotmega dialect).
+// Only MANUAL and HOLD are actually implemented; everything else is accepted
+// by the mode switcher but must be DENIED at the COMMAND_ACK level so the
+// QGC mode indicator stays truthful.
+constexpr uint32_t ROVER_MODE_MANUAL = 0;
+constexpr uint32_t ROVER_MODE_HOLD   = 4;
+
+inline bool rover_mode_supported(uint32_t custom_mode) {
+    return custom_mode == ROVER_MODE_MANUAL || custom_mode == ROVER_MODE_HOLD;
+}
+
 struct RoverState {
     bool        armed           = false;
     uint8_t     base_mode       = MAV_MODE_FLAG_CUSTOM_MODE_ENABLED;
-    uint32_t    custom_mode     = 0;  // 0=MANUAL (ArduRover custom_mode value)
+    uint32_t    custom_mode     = ROVER_MODE_MANUAL;
     sockaddr_in qgc_addr        = {};
     socklen_t   qgc_addr_len    = sizeof(sockaddr_in);
     bool        qgc_known       = false;

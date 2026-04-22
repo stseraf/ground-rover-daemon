@@ -146,8 +146,9 @@ int main()
             std::fclose(f);
         }
     }
-    if (state.qgc_ip_known)
-        autostart_stream(state);
+    // Defer stream autostart until first QGC packet. With qgc_ip_known from
+    // config but no GCS actually listening, starting now would bleed LTE
+    // traffic indefinitely (loss-detect requires a prior packet to arm).
 
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -195,12 +196,18 @@ int main()
         ssize_t n = sock.recv(receive_buffer, sizeof(receive_buffer),
                               state.qgc_addr, state.qgc_addr_len);
         if (n > 0) {
-            if (!state.qgc_known && last_qgc_packet_us != 0) {
-                logger::line("[qgc] reconnected — re-arming status messages");
-                banner_sent    = false;
-                prev_gps_valid = false;
-                prev_uplink[0] = '\0';
-                autostart_stream(state);
+            if (!state.qgc_known) {
+                if (last_qgc_packet_us != 0) {
+                    logger::line("[qgc] reconnected — re-arming status messages");
+                    banner_sent    = false;
+                    prev_gps_valid = false;
+                    prev_uplink[0] = '\0';
+                }
+                // First contact this session (fresh boot or reconnect).
+                // Start the stream now if we already have an IP from config;
+                // the learned-IP branch below covers the discover-on-packet case.
+                if (state.qgc_ip_known)
+                    autostart_stream(state);
             }
             last_qgc_packet_us = micros();
             state.qgc_known = true;
@@ -243,8 +250,12 @@ int main()
                             mavlink_set_mode_t sm;
                             mavlink_msg_set_mode_decode(&msg, &sm);
                             logger::line("rx: MAVLINK_MSG_ID_SET_MODE(11): base=0x%02X custom=%u", sm.base_mode, sm.custom_mode);
-                            state.base_mode   = sm.base_mode;
-                            state.custom_mode = sm.custom_mode;
+                            if (rover_mode_supported(sm.custom_mode)) {
+                                state.base_mode   = sm.base_mode;
+                                state.custom_mode = sm.custom_mode;
+                            } else {
+                                logger::line("    IGNORED: ROVER_MODE %u not implemented", sm.custom_mode);
+                            }
                             break;
                         }
                         case MAVLINK_MSG_ID_MANUAL_CONTROL: {
@@ -326,14 +337,47 @@ int main()
                             if (cam_idx >= 0)
                                 handle_camera_command_long(mav, state, &cmd, cam_idx);
                             else
-                                handle_command_long(mav, state, &cmd);
+                                handle_command_long(mav, state, params, &cmd);
                             break;
                         }
-                        case MAVLINK_MSG_ID_REQUEST_DATA_STREAM: {
-                            mavlink_request_data_stream_t rds;
-                            mavlink_msg_request_data_stream_decode(&msg, &rds);
-                            logger::line("rx: MAVLINK_MSG_ID_REQUEST_DATA_STREAM(66): req_stream_id=%u req_message_rate=%u start_stop=%u",
-                                rds.req_stream_id, rds.req_message_rate, rds.start_stop);
+                        case MAVLINK_MSG_ID_REQUEST_DATA_STREAM:
+                            // Deprecated MAVLink 1 subscription. QGC polls it
+                            // ~twice a second; we publish the equivalent streams
+                            // unconditionally (heartbeat, SYS_STATUS, GPS, etc.)
+                            // so this is a silent no-op.
+                            break;
+                        case MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL: {
+                            // Payload layout: seq(2) session(1) opcode(1) size(1)
+                            // req_opcode(1) burst_complete(1) pad(1) offset(4) data(239).
+                            mavlink_file_transfer_protocol_t ftp;
+                            mavlink_msg_file_transfer_protocol_decode(&msg, &ftp);
+                            const uint8_t* p = ftp.payload;
+                            uint16_t seq     = static_cast<uint16_t>(p[0] | (p[1] << 8));
+                            uint8_t  session = p[2];
+                            uint8_t  opcode  = p[3];
+                            uint8_t  size    = p[4];
+                            const char* opname;
+                            switch (opcode) {
+                                case 3:  opname = "ListDirectory"; break;
+                                case 4:  opname = "OpenFileRO"; break;
+                                case 5:  opname = "ReadFile"; break;
+                                case 14: opname = "CalcFileCRC32"; break;
+                                case 15: opname = "BurstReadFile"; break;
+                                default: opname = "?"; break;
+                            }
+                            char name[64] = {0};
+                            uint8_t n = size < sizeof(name) - 1 ? size : sizeof(name) - 1;
+                            for (uint8_t i = 0; i < n; ++i) {
+                                uint8_t c = p[12 + i];
+                                name[i] = (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.';
+                            }
+                            logger::line("rx: MAVLINK_MSG_ID_FILE_TRANSFER_PROTOCOL(110): opcode=%u(%s) data=\"%s\"",
+                                         opcode, opname, name);
+                            // NAK with FileNotFound(10) so QGC abandons FTP and
+                            // falls back to PARAM_REQUEST_LIST in ~6ms instead
+                            // of timing out for ~12s.
+                            mav.send_ftp_nak(state, msg.sysid, msg.compid,
+                                             seq, session, opcode, /*FileNotFound=*/10);
                             break;
                         }
                         case MAVLINK_MSG_ID_DATA_STREAM: {
@@ -351,9 +395,11 @@ int main()
                         case MAVLINK_MSG_ID_MISSION_REQUEST_LIST: {
                             mavlink_mission_request_list_t mrl;
                             mavlink_msg_mission_request_list_decode(&msg, &mrl);
-                            logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u", mrl.target_system, mrl.target_component);
-                            //std::printf("MAVLINK_MSG_ID_MISSION_COUNT(44) handle\n");
-                            mav.send_mission_count(state, mrl.target_system, mrl.target_component);
+                            logger::line("rx: MAVLINK_MSG_ID_MISSION_REQUEST_LIST(43): target=%u:%u type=%u",
+                                mrl.target_system, mrl.target_component, mrl.mission_type);
+                            // ArduRover clients poll MISSION, FENCE, and RALLY — answer count=0 for all three
+                            mav.send_mission_count(state, mrl.target_system, mrl.target_component,
+                                                   mrl.mission_type);
                             break;
                         }
                         case MAVLINK_MSG_ID_MISSION_ACK: {

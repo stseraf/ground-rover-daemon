@@ -17,7 +17,7 @@ void MavSender::send_heartbeat(const RoverState& state)
     mavlink_message_t msg;
     uint8_t base_mode = static_cast<uint8_t>(state.base_mode | (state.armed ? MAV_MODE_FLAG_SAFETY_ARMED : 0));
     mavlink_msg_heartbeat_pack(sys_id_, comp_id_, &msg,
-        MAV_TYPE_GROUND_ROVER, MAV_AUTOPILOT_GENERIC,
+        MAV_TYPE_GROUND_ROVER, MAV_AUTOPILOT_ARDUPILOTMEGA,
         base_mode, state.custom_mode, MAV_STATE_ACTIVE);
     send(msg, state);
 }
@@ -39,9 +39,18 @@ void MavSender::send_autopilot_version(const RoverState& state)
     mavlink_message_t msg;
     mavlink_autopilot_version_t av{};
     av.capabilities =
-        MAV_PROTOCOL_CAPABILITY_MISSION_INT
+        MAV_PROTOCOL_CAPABILITY_MISSION_FLOAT
+      | MAV_PROTOCOL_CAPABILITY_PARAM_FLOAT
+      | MAV_PROTOCOL_CAPABILITY_MISSION_INT
       | MAV_PROTOCOL_CAPABILITY_COMMAND_INT
+      | MAV_PROTOCOL_CAPABILITY_MISSION_FENCE
+      | MAV_PROTOCOL_CAPABILITY_MISSION_RALLY
       | MAV_PROTOCOL_CAPABILITY_MAVLINK2;
+    // ArduRover 4.6.3 OFFICIAL — encoded per AP_FWVersion convention.
+    // Tracks the "latest stable" baked into QGC so it doesn't pop up the
+    // "Vehicle is not running latest stable firmware" warning on connect.
+    av.flight_sw_version = (4u << 24) | (6u << 16) | (3u << 8) | FIRMWARE_VERSION_TYPE_OFFICIAL;
+    av.vendor_id         = 0x4141;  // 'AA' — ArduPilot convention
     mavlink_msg_autopilot_version_encode(sys_id_, comp_id_, &msg, &av);
     logger::line("tx: MAVLINK_MSG_ID_AUTOPILOT_VERSION(148): capabilities=0x%016llX",
                  (unsigned long long)av.capabilities);
@@ -65,9 +74,10 @@ void MavSender::send_current_mode(const RoverState& state)
     mavlink_current_mode_t cm{};
     cm.custom_mode          = state.custom_mode;
     cm.intended_custom_mode = state.custom_mode;
-    cm.standard_mode        = (state.custom_mode == 4)
-                              ? MAV_STANDARD_MODE_POSITION_HOLD
-                              : MAV_STANDARD_MODE_NON_STANDARD;
+    // Both modes report NON_STANDARD so QGC renders our mode_name ("HOLD" /
+    // "MANUAL") instead of substituting its own "Position" label for the
+    // POSITION_HOLD standard-mode code.
+    cm.standard_mode        = MAV_STANDARD_MODE_NON_STANDARD;
     mavlink_message_t msg;
     mavlink_msg_current_mode_encode(sys_id_, comp_id_, &msg, &cm);
     send(msg, state);
@@ -82,8 +92,8 @@ void MavSender::send_available_modes(const RoverState& state, uint32_t mode)
         uint32_t    properties;
     };
     constexpr std::array<ModeInfo, 2> modes{{
-        { "HOLD",   MAV_STANDARD_MODE_POSITION_HOLD, 4, 0 },
-        { "MANUAL", MAV_STANDARD_MODE_NON_STANDARD,  0, 0 }
+        { "HOLD",   MAV_STANDARD_MODE_NON_STANDARD, 4, 0 },
+        { "MANUAL", MAV_STANDARD_MODE_NON_STANDARD, 0, 0 }
     }};
     constexpr uint8_t number_modes = static_cast<uint8_t>(modes.size());
 
@@ -115,12 +125,13 @@ void MavSender::send_command_ack(const RoverState& state, uint16_t command, uint
 }
 
 void MavSender::send_mission_count(const RoverState& state,
-                                    uint8_t target_system, uint8_t target_component)
+                                    uint8_t target_system, uint8_t target_component,
+                                    uint8_t mission_type)
 {
     mavlink_message_t msg;
     mavlink_msg_mission_count_pack(sys_id_, comp_id_, &msg,
-        target_system, target_component, 0, MAV_MISSION_TYPE_MISSION, 0);
-    logger::line("tx: MAVLINK_MSG_ID_MISSION_COUNT(44): %u", 0);
+        target_system, target_component, 0, mission_type, 0);
+    logger::line("tx: MAVLINK_MSG_ID_MISSION_COUNT(44): count=0 type=%u", mission_type);
     send(msg, state);
 }
 
@@ -375,6 +386,49 @@ void MavSender::send_radio_status(const RoverState& state)
     mavlink_message_t msg;
     mavlink_msg_radio_status_pack(sys_id_, comp_id_, &msg,
         rssi, remrssi, txbuf, 0, 0, 0, 0);
+    send(msg, state);
+}
+
+void MavSender::send_gimbal_manager_information(const RoverState& state,
+                                                  uint8_t from_comp_id)
+{
+    mavlink_gimbal_manager_information_t gmi{};
+    struct timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    gmi.time_boot_ms     = static_cast<uint32_t>(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+    gmi.cap_flags        = 0;  // no axis control, no lock, no retract — nothing
+    gmi.gimbal_device_id = 0;  // no associated device → "standalone, empty" manager
+    // All angle ranges left at 0 (default) so QGC shows no control affordance.
+    mavlink_message_t msg;
+    mavlink_msg_gimbal_manager_information_encode(sys_id_, from_comp_id, &msg, &gmi);
+    send(msg, state);
+}
+
+void MavSender::send_ftp_nak(const RoverState& state,
+                              uint8_t target_system, uint8_t target_component,
+                              uint16_t req_seq, uint8_t session,
+                              uint8_t req_opcode, uint8_t error_code)
+{
+    // Payload header layout (per MAVLink FTP spec):
+    //   [0..1] seq   [2] session   [3] opcode   [4] size
+    //   [5] req_opcode   [6] burst_complete   [7] pad
+    //   [8..11] offset   [12..] data
+    mavlink_file_transfer_protocol_t ftp{};
+    ftp.target_network   = 0;
+    ftp.target_system    = target_system;
+    ftp.target_component = target_component;
+
+    uint16_t seq = static_cast<uint16_t>(req_seq + 1);
+    ftp.payload[0]  = static_cast<uint8_t>(seq & 0xFF);
+    ftp.payload[1]  = static_cast<uint8_t>((seq >> 8) & 0xFF);
+    ftp.payload[2]  = session;
+    ftp.payload[3]  = 129;            // NAK
+    ftp.payload[4]  = 1;               // size: one byte of data (error code)
+    ftp.payload[5]  = req_opcode;
+    ftp.payload[12] = error_code;
+
+    mavlink_message_t msg;
+    mavlink_msg_file_transfer_protocol_encode(sys_id_, comp_id_, &msg, &ftp);
     send(msg, state);
 }
 
