@@ -42,9 +42,13 @@ ParamStore::ParamStore()
     params_[18] = {"COMPASS_DEV_ID",   0.0f};
     params_[19] = {"COMPASS_DEV_ID2",  0.0f};
     params_[20] = {"COMPASS_DEV_ID3",  0.0f};
-    params_[21] = {"INS_ACCOFFS_X",    0.0f};
-    params_[22] = {"INS_ACCOFFS_Y",    0.0f};
-    params_[23] = {"INS_ACCOFFS_Z",    0.0f};
+    // Pre-seeded residual offsets — any nonzero triple flips QGC's
+    // Sensors/Accelerometer readiness from "never calibrated" to "calibrated"
+    // without running the calibration flow. Actual per-run values come from
+    // handle_preflight_calibration(), which jitters these on each fake cal.
+    params_[21] = {"INS_ACCOFFS_X",    0.02f};
+    params_[22] = {"INS_ACCOFFS_Y",   -0.01f};
+    params_[23] = {"INS_ACCOFFS_Z",    0.03f};
     params_[24] = {"FLTMODE1",         0.0f};
     params_[25] = {"FLTMODE2",         0.0f};
     params_[26] = {"FLTMODE3",         0.0f};
@@ -85,6 +89,20 @@ ParamStore::ParamStore()
     params_[55] = {"RC3_REV",         1.0f};
     params_[56] = {"RC4_REV",         1.0f};
     params_[57] = {"COMPASS_AUTODEC", 1.0f};
+    // IMU calibration state — completes the "accel cal ran" picture for
+    // QGC. Scales at 1.0 and tiny nonzero gyro offsets match what a real
+    // post-calibration ArduPilot param set looks like.
+    params_[58] = {"INS_ACCSCAL_X",   1.001f};
+    params_[59] = {"INS_ACCSCAL_Y",   0.999f};
+    params_[60] = {"INS_ACCSCAL_Z",   1.000f};
+    params_[61] = {"INS_GYROFFS_X",   0.001f};
+    params_[62] = {"INS_GYROFFS_Y",  -0.002f};
+    params_[63] = {"INS_GYROFFS_Z",   0.001f};
+    // AHRS trim — target of MAV_CMD_PREFLIGHT_CALIBRATION param5=2 ("Level
+    // Horizon"). Zero = vehicle reported flat.
+    params_[64] = {"AHRS_TRIM_X",     0.0f};
+    params_[65] = {"AHRS_TRIM_Y",     0.0f};
+    params_[66] = {"AHRS_TRIM_Z",     0.0f};
     load(Config::PARAM_FILE);
 }
 

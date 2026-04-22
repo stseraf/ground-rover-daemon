@@ -330,7 +330,7 @@ int main()
                             if (cam_idx >= 0)
                                 handle_camera_command_long(mav, state, &cmd, cam_idx);
                             else
-                                handle_command_long(mav, state, &cmd);
+                                handle_command_long(mav, state, params, &cmd);
                             break;
                         }
                         case MAVLINK_MSG_ID_REQUEST_DATA_STREAM:
