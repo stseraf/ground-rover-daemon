@@ -39,16 +39,26 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
             break;
 
         case MAVLINK_MSG_ID_VIDEO_STREAM_INFORMATION:
-            // One RTSP endpoint serves all clients; advertise a single
-            // stream regardless of how many libcamera modes exist.
-            logger::line("tx: VIDEO_STREAM_INFORMATION(269) cam=%d", cam_idx);
-            mav.send_video_stream_information(cc, state, cam, cam_idx, 0);
+            // One VIDEO_STREAM_INFORMATION per libcamera sensor mode →
+            // QGC populates its gear-dropdown with one entry per mount.
+            logger::line("tx: VIDEO_STREAM_INFORMATION(269) cam=%d %zu stream(s)",
+                         cam_idx, cam.modes.size());
+            for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
+                mav.send_video_stream_information(cc, state, cam, cam_idx, i);
             break;
 
         case MAVLINK_MSG_ID_VIDEO_STREAM_STATUS: {
             auto stream_id = static_cast<uint8_t>(cmd->param2);
-            logger::line("tx: VIDEO_STREAM_STATUS(270) cam=%d stream=%u", cam_idx, stream_id);
-            mav.send_video_stream_status(cc, state, cam, cam_idx, 1);
+            if (stream_id == 0) {
+                logger::line("tx: VIDEO_STREAM_STATUS(270) cam=%d all streams", cam_idx);
+                for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
+                    mav.send_video_stream_status(cc, state, cam, cam_idx,
+                                                  static_cast<uint8_t>(i + 1));
+            } else {
+                logger::line("tx: VIDEO_STREAM_STATUS(270) cam=%d stream=%u",
+                             cam_idx, stream_id);
+                mav.send_video_stream_status(cc, state, cam, cam_idx, stream_id);
+            }
             break;
         }
 
@@ -96,7 +106,8 @@ void handle_camera_command_long(MavSender& mav, const RoverState& state,
             logger::line("rx: deprecated REQUEST_VIDEO_STREAM_INFORMATION cam=%d", cam_idx);
             mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                      cmd->target_system, cmd->target_component);
-            mav.send_video_stream_information(cc, state, cam, cam_idx, 0);
+            for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
+                mav.send_video_stream_information(cc, state, cam, cam_idx, i);
             break;
 
         case MAV_CMD_REQUEST_CAMERA_SETTINGS:
@@ -126,7 +137,13 @@ void handle_camera_command_long(MavSender& mav, const RoverState& state,
                          cam_idx, stream_id);
             mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                      cmd->target_system, cmd->target_component);
-            mav.send_video_stream_status(cc, state, cam, cam_idx, 1);
+            if (stream_id == 0) {
+                for (int i = 0; i < static_cast<int>(cam.modes.size()); ++i)
+                    mav.send_video_stream_status(cc, state, cam, cam_idx,
+                                                  static_cast<uint8_t>(i + 1));
+            } else {
+                mav.send_video_stream_status(cc, state, cam, cam_idx, stream_id);
+            }
             break;
         }
 

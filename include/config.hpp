@@ -12,10 +12,13 @@ namespace Config {
     constexpr uint64_t LOOP_SLEEP_US         = 1'000;
 
     // Embedded RTSP video server.
-    // Clients pull: rtsp://<rover>:8554/stream. Pipeline only runs while at
-    // least one client is connected, so no capture/LTE cost when idle.
-    constexpr uint16_t    RTSP_PORT  = 8554;
-    constexpr const char* RTSP_MOUNT = "/stream";
+    // Clients pull: rtsp://<rover>:8554/stream-<N> where N is 1-indexed
+    // sensor mode (1 = default / lowest resolution). Each mount has its
+    // own capture pipeline; only one active at a time (libcamerasrc is
+    // exclusive). Pipeline only runs while at least one client is
+    // connected, so no capture/LTE cost when idle.
+    constexpr uint16_t    RTSP_PORT          = 8554;
+    constexpr const char* RTSP_MOUNT_PREFIX  = "/stream";
 
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
     constexpr int16_t  DRIVE_DEAD_ZONE       = 30;

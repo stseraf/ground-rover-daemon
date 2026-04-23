@@ -101,18 +101,28 @@ int main()
     state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
     state.video_fps         = static_cast<uint32_t>(params.get(6));
 
-    // Embedded RTSP server — clients pull from rtsp://<rover>:8554/stream.
-    // Pipeline runs only while at least one client is connected; idle cost
-    // is a listening socket.
+    // Embedded RTSP server — clients pull from rtsp://<rover>:8554/stream-N
+    // (N = 1-indexed sensor mode). One mount per resolution gives QGC's
+    // "gear" video-source dropdown a stream to switch between. libcamerasrc
+    // is exclusive, so only one mount has an active pipeline at a time;
+    // the switch costs ~1-2 s for camera release + reopen.
     RtspServer rtsp;
     if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
-        const SensorMode& mode = state.cameras[0].modes[0];
-        int fps     = static_cast<int>(state.video_fps);
-        int max_fps = static_cast<int>(mode.fps);
-        if (fps > max_fps) fps = max_fps;
-        rtsp.start(Config::RTSP_PORT, Config::RTSP_MOUNT,
-                   mode.width, mode.height, fps,
-                   state.video_bitrate_bps);
+        const CameraInfo& cam = state.cameras[0];
+        std::vector<RtspServer::Stream> streams;
+        streams.reserve(cam.modes.size());
+        for (size_t i = 0; i < cam.modes.size(); ++i) {
+            const SensorMode& mode = cam.modes[i];
+            int fps     = static_cast<int>(state.video_fps);
+            int max_fps = static_cast<int>(mode.fps);
+            if (fps > max_fps) fps = max_fps;
+            char mount[32];
+            std::snprintf(mount, sizeof(mount), "%s-%zu",
+                          Config::RTSP_MOUNT_PREFIX, i + 1);
+            streams.push_back({mount, mode.width, mode.height, fps,
+                               state.video_bitrate_bps});
+        }
+        rtsp.start(Config::RTSP_PORT, streams);
     } else {
         logger::line("[rtsp] no camera detected — server not started");
     }
@@ -174,16 +184,11 @@ int main()
                 std::snprintf(banner, sizeof(banner), "Rover %s@%s", GIT_BRANCH, GIT_SHA);
                 mav.send_statustext(state, MAV_SEVERITY_INFO, banner);
                 if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
-                    const SensorMode& m = state.cameras[0].modes[0];
-                    int fps     = static_cast<int>(state.video_fps);
-                    int max_fps = static_cast<int>(m.fps);
-                    if (fps > max_fps) fps = max_fps;
                     char stxt[64];
                     std::snprintf(stxt, sizeof(stxt),
-                                  "RTSP :%u%s — %ux%u %d/%dfps %ukbps",
-                                  Config::RTSP_PORT, Config::RTSP_MOUNT,
-                                  m.width, m.height, fps, max_fps,
-                                  state.video_bitrate_bps / 1000);
+                                  "RTSP :%u%s-{1..%zu}",
+                                  Config::RTSP_PORT, Config::RTSP_MOUNT_PREFIX,
+                                  state.cameras[0].modes.size());
                     mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
                 }
                 banner_sent = true;

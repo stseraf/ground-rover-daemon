@@ -208,20 +208,20 @@ void MavSender::send_camera_information(uint8_t cam_comp_id, const RoverState& s
     send(msg, state);
 }
 
-// The RTSP server exposes exactly one endpoint (rtsp://<rover>:8554/stream)
-// at the resolution/framerate the daemon was started with. libcamera's
-// multiple sensor modes are an internal detail — from QGC's perspective
-// there's one stream. We always advertise count=1, stream_id=1, and the
-// mode[0] metadata as "what's actually flowing".
+// Each libcamera sensor mode is a distinct RTSP mount at
+// rtsp://<rover>:8554/stream-<N> (N = mode_idx + 1). QGC renders these as
+// selectable entries in its video gear-dropdown; switching picks a
+// different URL. Only one mount can actually stream at a time
+// (libcamerasrc is exclusive), but that's transparent to the client.
 void MavSender::send_video_stream_information(uint8_t cam_comp_id, const RoverState& state,
-                                               const CameraInfo& cam, int cam_idx, int /*mode_idx*/)
+                                               const CameraInfo& cam, int cam_idx, int mode_idx)
 {
     (void)cam_idx;
-    const SensorMode& mode = cam.modes[0];
+    const SensorMode& mode = cam.modes[mode_idx];
 
     mavlink_video_stream_information_t info{};
-    info.stream_id        = 1;
-    info.count            = 1;
+    info.stream_id        = static_cast<uint8_t>(mode_idx + 1);
+    info.count            = static_cast<uint8_t>(cam.modes.size());
     info.type             = VIDEO_STREAM_TYPE_RTSP;
     // Always report RUNNING — the RTSP server is always listening. The
     // capture pipeline itself is client-driven (start on connect, stop on
@@ -241,8 +241,9 @@ void MavSender::send_video_stream_information(uint8_t cam_comp_id, const RoverSt
     // breaks any working stream the operator set manually.
     std::string rover_ip = rover_ip_for_peer(state.qgc_addr, state.qgc_addr_len);
     if (!rover_ip.empty()) {
-        std::snprintf(info.uri, sizeof(info.uri), "rtsp://%s:%u%s",
-                      rover_ip.c_str(), Config::RTSP_PORT, Config::RTSP_MOUNT);
+        std::snprintf(info.uri, sizeof(info.uri), "rtsp://%s:%u%s-%d",
+                      rover_ip.c_str(), Config::RTSP_PORT,
+                      Config::RTSP_MOUNT_PREFIX, mode_idx + 1);
     } else {
         // IP unknown (rare — requires no MAVLink peer seen yet). Leave uri
         // empty so QGC falls back to the operator's manual config.
@@ -256,14 +257,15 @@ void MavSender::send_video_stream_information(uint8_t cam_comp_id, const RoverSt
 
 void MavSender::send_video_stream_status(uint8_t cam_comp_id, const RoverState& state,
                                           const CameraInfo& cam, int /*cam_idx*/,
-                                          uint8_t /*stream_id*/)
+                                          uint8_t stream_id)
 {
-    // One stream exists regardless of what QGC requested. Always reply as
-    // stream_id=1 with the running resolution/framerate.
-    const SensorMode& mode = cam.modes[0];
+    int mode_idx = stream_id - 1;
+    if (mode_idx < 0 || mode_idx >= static_cast<int>(cam.modes.size())) return;
+
+    const SensorMode& mode = cam.modes[mode_idx];
 
     mavlink_video_stream_status_t status{};
-    status.stream_id    = 1;
+    status.stream_id    = stream_id;
     status.flags        = VIDEO_STREAM_STATUS_FLAGS_RUNNING;
     status.framerate    = std::min(static_cast<float>(state.video_fps), mode.fps);
     status.resolution_h = mode.width;

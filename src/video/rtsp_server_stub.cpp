@@ -9,12 +9,10 @@
 RtspServer::RtspServer() {}
 RtspServer::~RtspServer() {}
 
-bool RtspServer::start(uint16_t port, const char* mount,
-                       uint16_t /*width*/, uint16_t /*height*/,
-                       int /*fps*/, uint32_t /*bitrate_bps*/)
+bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
 {
-    logger::line("[rtsp] stub build (VIDEO=none) — no video served on :%u%s",
-                 port, mount);
+    logger::line("[rtsp] stub build (VIDEO=none) — %zu stream(s) ignored on :%u",
+                 streams.size(), port);
     return false;
 }
 

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <pthread.h>
+#include <string>
+#include <vector>
 
 struct _GMainLoop;
 struct _GstRTSPServer;
@@ -9,29 +11,38 @@ struct _GstRTSPServer;
 // Embedded RTSP server wrapping gst-rtsp-server. Runs its own GMainLoop on
 // a pthread; the daemon's MAVLink loop is untouched.
 //
-// Pull model: the capture pipeline is constructed on first client connect
-// and torn down when the last client disconnects. libcamerasrc is therefore
-// only held while someone is actually watching — no LTE burn when idle.
+// Pull model: a capture pipeline is constructed on first client connect to
+// a given mount and torn down when the last client of that mount disconnects.
+// libcamerasrc is therefore only held while someone is actually watching —
+// no LTE burn when idle.
 //
-// Exclusive-use caveat: libcamerasrc can't be opened twice, so set_shared(TRUE)
-// gives every connected client frames from the same encoder.
+// Exclusive-use caveat: libcamerasrc can't be opened twice. Each mount has
+// its own factory and pipeline, so only one mount can be actively streaming
+// at a time. Switching streams = disconnect old, connect new, ~1-2 s for
+// the camera to release and reopen.
 class RtspServer {
 public:
+    struct Stream {
+        std::string mount;
+        uint16_t    width;
+        uint16_t    height;
+        int         fps;
+        uint32_t    bitrate_bps;
+    };
+
     RtspServer();
     ~RtspServer();
 
     RtspServer(const RtspServer&)            = delete;
     RtspServer& operator=(const RtspServer&) = delete;
 
-    // Starts the server listening on port:mount. Pipeline params are fixed
-    // for the lifetime of the server — changes to VIDEO_BITRATE / VIDEO_FPS
-    // take effect on daemon restart. Returns true on success.
-    bool start(uint16_t port, const char* mount,
-               uint16_t width, uint16_t height,
-               int fps, uint32_t bitrate_bps);
+    // Starts the server listening on `port`. One factory is registered per
+    // stream — each with its own capture+encode pipeline at the requested
+    // resolution/fps/bitrate.
+    bool start(uint16_t port, const std::vector<Stream>& streams);
 
     // Signals the GMainLoop to quit and joins the thread. Safe to call from
-    // a signal handler context — uses g_main_loop_quit() which is thread-safe.
+    // a signal-handler context — uses g_main_loop_quit() which is thread-safe.
     void stop();
 
 private:

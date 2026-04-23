@@ -15,44 +15,52 @@ RtspServer::~RtspServer()
     stop();
 }
 
-bool RtspServer::start(uint16_t port, const char* mount,
-                       uint16_t width, uint16_t height,
-                       int fps, uint32_t bitrate_bps)
+bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
 {
     if (running_) return false;
+    if (streams.empty()) {
+        logger::line("[rtsp] no streams configured — server not started");
+        return false;
+    }
 
     // gst_init is idempotent — safe to call on every start(); cheap
     // after the first invocation (scans the plugin registry once).
     gst_init(nullptr, nullptr);
-
-    // Pipeline: libcamerasrc → v4l2h264enc → rtph264pay(name=pay0).
-    // "pay0" is how gst-rtsp-server locates the RTP payload output.
-    char launch[640];
-    std::snprintf(launch, sizeof(launch),
-        "( libcamerasrc ! "
-        "video/x-raw,width=%u,height=%u,framerate=%d/1 ! "
-        "v4l2h264enc extra-controls=\"controls,repeat_sequence_header=1,"
-        "video_bitrate=%u\" ! "
-        "video/x-h264,level=(string)4 ! "
-        "h264parse config-interval=-1 ! "
-        "rtph264pay config-interval=1 pt=96 mtu=1400 name=pay0 )",
-        width, height, fps, bitrate_bps);
 
     server_ = gst_rtsp_server_new();
     char port_str[8];
     std::snprintf(port_str, sizeof(port_str), "%u", port);
     gst_rtsp_server_set_service(server_, port_str);
 
-    GstRTSPMountPoints*   mounts  = gst_rtsp_server_get_mount_points(server_);
-    GstRTSPMediaFactory*  factory = gst_rtsp_media_factory_new();
-    gst_rtsp_media_factory_set_launch(factory, launch);
-    // Shared: one encoder feeds all clients. Required because libcamerasrc
-    // is exclusive-access.
-    gst_rtsp_media_factory_set_shared(factory, TRUE);
-    // No server-side jitter buffering — we want the lowest possible latency
-    // and the client can do its own jitter handling if it wants.
-    gst_rtsp_media_factory_set_latency(factory, 0);
-    gst_rtsp_mount_points_add_factory(mounts, mount, factory);
+    GstRTSPMountPoints* mounts = gst_rtsp_server_get_mount_points(server_);
+    for (const auto& s : streams) {
+        // Pipeline: libcamerasrc → v4l2h264enc → rtph264pay(name=pay0).
+        // "pay0" is how gst-rtsp-server locates the RTP payload output.
+        char launch[640];
+        std::snprintf(launch, sizeof(launch),
+            "( libcamerasrc ! "
+            "video/x-raw,width=%u,height=%u,framerate=%d/1 ! "
+            "v4l2h264enc extra-controls=\"controls,repeat_sequence_header=1,"
+            "video_bitrate=%u\" ! "
+            "video/x-h264,level=(string)4 ! "
+            "h264parse config-interval=-1 ! "
+            "rtph264pay config-interval=1 pt=96 mtu=1400 name=pay0 )",
+            s.width, s.height, s.fps, s.bitrate_bps);
+
+        GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();
+        gst_rtsp_media_factory_set_launch(factory, launch);
+        // Shared: one encoder feeds all clients OF THIS MOUNT. Required
+        // because libcamerasrc is exclusive-access — cross-mount switching
+        // is serialised (old mount releases camera before new one opens).
+        gst_rtsp_media_factory_set_shared(factory, TRUE);
+        // No server-side jitter buffering — we want the lowest possible
+        // latency and the client can do its own jitter handling if it wants.
+        gst_rtsp_media_factory_set_latency(factory, 0);
+        gst_rtsp_mount_points_add_factory(mounts, s.mount.c_str(), factory);
+
+        logger::line("[rtsp]   mount %s → %ux%u @%dfps %ukbps",
+                     s.mount.c_str(), s.width, s.height, s.fps, s.bitrate_bps / 1000);
+    }
     g_object_unref(mounts);
 
     if (gst_rtsp_server_attach(server_, nullptr) == 0) {
@@ -73,8 +81,7 @@ bool RtspServer::start(uint16_t port, const char* mount,
     }
 
     running_ = true;
-    logger::line("[rtsp] listening on rtsp://<rover>:%u%s (%ux%u @%dfps %ukbps)",
-                 port, mount, width, height, fps, bitrate_bps / 1000);
+    logger::line("[rtsp] listening on port %u (%zu stream(s))", port, streams.size());
     return true;
 }
 
