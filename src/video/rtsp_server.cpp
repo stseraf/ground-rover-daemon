@@ -27,6 +27,10 @@ bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
     // after the first invocation (scans the plugin registry once).
     gst_init(nullptr, nullptr);
 
+    // Dedicated context so stop() can fully destroy it and release the
+    // listen socket immediately — avoids EADDRINUSE on restart.
+    ctx_ = g_main_context_new();
+
     server_ = gst_rtsp_server_new();
     char port_str[8];
     std::snprintf(port_str, sizeof(port_str), "%u", port);
@@ -44,7 +48,7 @@ bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
             "video_bitrate=%u\" ! "
             "video/x-h264,level=(string)4 ! "
             "h264parse config-interval=-1 ! "
-            "rtph264pay config-interval=1 pt=96 mtu=1400 name=pay0 )",
+            "rtph264pay config-interval=-1 pt=96 mtu=1400 name=pay0 )",
             s.width, s.height, s.fps, s.bitrate_bps);
 
         GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();
@@ -63,20 +67,21 @@ bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
     }
     g_object_unref(mounts);
 
-    if (gst_rtsp_server_attach(server_, nullptr) == 0) {
+    if (gst_rtsp_server_attach(server_, ctx_) == 0) {
         logger::line("[rtsp] failed to attach server on port %u", port);
         g_object_unref(server_);
         server_ = nullptr;
+        g_main_context_unref(ctx_);
+        ctx_ = nullptr;
         return false;
     }
 
-    loop_ = g_main_loop_new(nullptr, FALSE);
+    loop_ = g_main_loop_new(ctx_, FALSE);
     if (pthread_create(&thread_, nullptr, &RtspServer::thread_main, this) != 0) {
         logger::line("[rtsp] pthread_create failed");
-        g_main_loop_unref(loop_);
-        loop_ = nullptr;
-        g_object_unref(server_);
-        server_ = nullptr;
+        g_main_loop_unref(loop_);   loop_   = nullptr;
+        g_object_unref(server_);    server_ = nullptr;
+        g_main_context_unref(ctx_); ctx_    = nullptr;
         return false;
     }
 
@@ -93,8 +98,9 @@ void RtspServer::stop()
     if (loop_) g_main_loop_quit(loop_);
     pthread_join(thread_, nullptr);
 
-    if (loop_)   { g_main_loop_unref(loop_);       loop_   = nullptr; }
-    if (server_) { g_object_unref(server_);        server_ = nullptr; }
+    if (loop_)   { g_main_loop_unref(loop_);   loop_   = nullptr; }
+    if (server_) { g_object_unref(server_);    server_ = nullptr; }
+    if (ctx_)    { g_main_context_unref(ctx_); ctx_    = nullptr; }
     logger::line("[rtsp] stopped");
 }
 

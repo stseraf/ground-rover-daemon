@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+struct _GMainContext;
 struct _GMainLoop;
 struct _GstRTSPServer;
 
@@ -48,6 +49,7 @@ public:
 private:
     static void* thread_main(void* self);
 
+    _GMainContext*  ctx_    = nullptr;
     _GMainLoop*     loop_   = nullptr;
     _GstRTSPServer* server_ = nullptr;
     pthread_t       thread_{};

@@ -101,6 +101,33 @@ int main()
     state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
     state.video_fps         = static_cast<uint32_t>(params.get(6));
 
+    // Param indices 9-12: per-mode bitrates VIDEO_BITRATE_1..4
+    static constexpr int VIDEO_BITRATE_PARAM_BASE = 9;
+
+    auto build_rtsp_streams = [&]() -> std::vector<RtspServer::Stream> {
+        std::vector<RtspServer::Stream> streams;
+        if (state.cameras.empty() || state.cameras[0].modes.empty())
+            return streams;
+        const CameraInfo& cam = state.cameras[0];
+        streams.reserve(cam.modes.size());
+        for (size_t i = 0; i < cam.modes.size(); ++i) {
+            const SensorMode& mode = cam.modes[i];
+            int fps     = static_cast<int>(state.video_fps);
+            int max_fps = static_cast<int>(mode.fps);
+            if (fps > max_fps) fps = max_fps;
+            // Use per-mode bitrate if available (indices 9-12), else fall back to VIDEO_BITRATE
+            int param_idx = VIDEO_BITRATE_PARAM_BASE + static_cast<int>(i);
+            uint32_t bps = (param_idx < ParamStore::COUNT)
+                           ? static_cast<uint32_t>(params.get(param_idx))
+                           : state.video_bitrate_bps;
+            char mount[32];
+            std::snprintf(mount, sizeof(mount), "%s-%zu",
+                          Config::RTSP_MOUNT_PREFIX, i + 1);
+            streams.push_back({mount, mode.width, mode.height, fps, bps});
+        }
+        return streams;
+    };
+
     // Embedded RTSP server — clients pull from rtsp://<rover>:8554/stream-N
     // (N = 1-indexed sensor mode). One mount per resolution gives QGC's
     // "gear" video-source dropdown a stream to switch between. libcamerasrc
@@ -108,21 +135,7 @@ int main()
     // the switch costs ~1-2 s for camera release + reopen.
     RtspServer rtsp;
     if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
-        const CameraInfo& cam = state.cameras[0];
-        std::vector<RtspServer::Stream> streams;
-        streams.reserve(cam.modes.size());
-        for (size_t i = 0; i < cam.modes.size(); ++i) {
-            const SensorMode& mode = cam.modes[i];
-            int fps     = static_cast<int>(state.video_fps);
-            int max_fps = static_cast<int>(mode.fps);
-            if (fps > max_fps) fps = max_fps;
-            char mount[32];
-            std::snprintf(mount, sizeof(mount), "%s-%zu",
-                          Config::RTSP_MOUNT_PREFIX, i + 1);
-            streams.push_back({mount, mode.width, mode.height, fps,
-                               state.video_bitrate_bps});
-        }
-        rtsp.start(Config::RTSP_PORT, streams);
+        rtsp.start(Config::RTSP_PORT, build_rtsp_streams());
     } else {
         logger::line("[rtsp] no camera detected — server not started");
     }
@@ -354,12 +367,23 @@ int main()
                                 params.save(Config::PARAM_FILE);
                                 mav.send_param(state, params.name(idx), params.get(idx),
                                                static_cast<uint16_t>(idx), ParamStore::COUNT);
-                                if (std::strncmp(params.name(idx), "VIDEO_BITRATE", 16) == 0)
-                                    state.video_bitrate_bps =
-                                        static_cast<uint32_t>(params.get(idx));
-                                if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0)
-                                    state.video_fps =
-                                        static_cast<uint32_t>(params.get(idx));
+                                bool rtsp_restart = false;
+                                if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0) {
+                                    state.video_fps = static_cast<uint32_t>(params.get(idx));
+                                    rtsp_restart = true;
+                                }
+                                if (std::strncmp(params.name(idx), "VIDEO_BITRATE", 13) == 0) {
+                                    // matches VIDEO_BITRATE (deprecated fallback) and VIDEO_BITRATE_1..4
+                                    if (idx == 5)
+                                        state.video_bitrate_bps = static_cast<uint32_t>(params.get(idx));
+                                    rtsp_restart = true;
+                                }
+                                if (rtsp_restart && !state.cameras.empty() &&
+                                    !state.cameras[0].modes.empty()) {
+                                    logger::line("[rtsp] param changed — restarting server");
+                                    rtsp.stop();
+                                    rtsp.start(Config::RTSP_PORT, build_rtsp_streams());
+                                }
 #ifdef LTE_USB
                                 if (std::strncmp(params.name(idx), "NET_LINK_PREF", 16) == 0) {
                                     int pref = static_cast<int>(params.get(idx));
