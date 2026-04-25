@@ -2,6 +2,7 @@
 #include "mav_sender.hpp"
 #include "rover_state.hpp"
 #include "logger.hpp"
+#include "video/video_backend.hpp"
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,8 @@ void handle_camera_request_message(MavSender& mav, const RoverState& state,
 
 // ── Command-long handler ───────────────────────────────────────────────────
 
-void handle_camera_command_long(MavSender& mav, const RoverState& state,
+void handle_camera_command_long(MavSender& mav, RoverState& state,
+                                VideoBackend* backend,
                                 const mavlink_command_long_t* cmd,
                                 int cam_idx)
 {
@@ -147,22 +149,26 @@ void handle_camera_command_long(MavSender& mav, const RoverState& state,
             break;
         }
 
-        // Video delivery is via the embedded RTSP server (pull model). These
-        // commands are QGC-initiated "streaming on/off" hints; we ACK so the
-        // UI stays happy, but the RTSP factory starts/stops the pipeline on
-        // its own client-connect/-disconnect events.
-        case MAV_CMD_VIDEO_START_STREAMING:
-            logger::line("rx: VIDEO_START_STREAMING cam=%d (rtsp: no-op, client-driven)",
-                         cam_idx);
+        // Forward to active VideoBackend. RTSP treats these as no-ops
+        // (pipeline lifecycle is bound to client connect/disconnect inside
+        // gst-rtsp-server). UDP push uses them to spawn/kill the
+        // gst-launch subprocess for the requested stream_id.
+        case MAV_CMD_VIDEO_START_STREAMING: {
+            auto stream_id = static_cast<uint8_t>(cmd->param1);
+            logger::line("rx: VIDEO_START_STREAMING cam=%d stream=%u",
+                         cam_idx, stream_id);
             mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                      cmd->target_system, cmd->target_component);
+            if (backend && stream_id >= 1)
+                backend->start_stream(stream_id);
             break;
+        }
 
         case MAV_CMD_VIDEO_STOP_STREAMING:
-            logger::line("rx: VIDEO_STOP_STREAMING cam=%d (rtsp: no-op, client-driven)",
-                         cam_idx);
+            logger::line("rx: VIDEO_STOP_STREAMING cam=%d", cam_idx);
             mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                      cmd->target_system, cmd->target_component);
+            if (backend) backend->stop_stream();
             break;
 
         case MAV_CMD_RESET_CAMERA_SETTINGS:

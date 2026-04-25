@@ -20,6 +20,16 @@ namespace Config {
     constexpr uint16_t    RTSP_PORT          = 8554;
     constexpr const char* RTSP_MOUNT_PREFIX  = "/stream";
 
+    // UDP-push transport (alternative to RTSP, selected at runtime).
+    // Rover spawns gst-launch and sends RTP/H.264 to udp://<qgc>:UDP_VIDEO_PORT.
+    // 5600 matches QGC's default raw-UDP video receiver port.
+    constexpr uint16_t    UDP_VIDEO_PORT     = 5600;
+
+    // VIDEO_BITRATE_1..N MAVLink params: one per sensor mode, bps. Cap matches
+    // every MIPI sensor we currently support (OV5647, IMX219, IMX477 — all
+    // 4 modes); raising this requires adding more VIDEO_BITRATE_N params.
+    constexpr int         MAX_VIDEO_BITRATE_PARAMS = 4;
+
     constexpr int16_t  DRIVE_AXIS_MAX        = 1000;
     constexpr int16_t  DRIVE_DEAD_ZONE       = 30;
     constexpr uint16_t DRIVE_PWM_CENTER      = 1500;

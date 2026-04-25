@@ -48,7 +48,7 @@ bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
             "video_bitrate=%u\" ! "
             "video/x-h264,level=(string)4 ! "
             "h264parse config-interval=-1 ! "
-            "rtph264pay config-interval=-1 pt=96 mtu=1400 name=pay0 )",
+            "rtph264pay config-interval=1 pt=96 mtu=1400 name=pay0 )",
             s.width, s.height, s.fps, s.bitrate_bps);
 
         GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();

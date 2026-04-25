@@ -68,7 +68,9 @@ SRCS = src/main.cpp \
        src/mavlink/param_store.cpp \
        src/mavlink/command_handlers.cpp \
        src/mavlink/camera_handlers.cpp \
-       src/camera/camera_discovery.cpp
+       src/camera/camera_discovery.cpp \
+       src/video/rtsp_backend.cpp \
+       src/video/udp_backend.cpp
 
 ifeq ($(VIDEO),rtsp)
   SRCS += src/video/rtsp_server.cpp

@@ -222,32 +222,45 @@ void MavSender::send_video_stream_information(uint8_t cam_comp_id, const RoverSt
     mavlink_video_stream_information_t info{};
     info.stream_id        = static_cast<uint8_t>(mode_idx + 1);
     info.count            = static_cast<uint8_t>(cam.modes.size());
-    info.type             = VIDEO_STREAM_TYPE_RTSP;
-    // Always report RUNNING — the RTSP server is always listening. The
-    // capture pipeline itself is client-driven (start on connect, stop on
-    // last disconnect) and QGC has no visibility into that distinction.
+    // Transport-dependent advertisement. RTSP type lets QGC build its own
+    // RTSP client; RTPUDP tells QGC to listen for inbound RTP — matching
+    // what the active backend will actually deliver.
+    info.type             = (state.video_transport == 1)
+                            ? VIDEO_STREAM_TYPE_RTPUDP
+                            : VIDEO_STREAM_TYPE_RTSP;
+    // Always report RUNNING — the server side (RTSP listener or daemon
+    // itself for UDP push) is always present. The actual capture pipeline
+    // is client-driven and QGC has no visibility into that distinction.
     info.flags            = VIDEO_STREAM_STATUS_FLAGS_RUNNING;
     info.framerate        = std::min(static_cast<float>(state.video_fps), mode.fps);
     info.resolution_h     = mode.width;
     info.resolution_v     = mode.height;
-    info.bitrate          = state.video_bitrate_bps;
+    info.bitrate          = (mode_idx >= 0 &&
+                             mode_idx < Config::MAX_VIDEO_BITRATE_PARAMS)
+                            ? state.per_mode_bitrate_bps[mode_idx] : 0;
     info.rotation         = 0;
     info.hfov             = 0;
     info.encoding         = VIDEO_STREAM_ENCODING_H264;
     info.camera_device_id = 0;  // 0 = MAVLink camera with its own comp_id
     std::memcpy(info.name, mode.name, sizeof(info.name));  // both are char[32]
-    // Auto-configure QGC's video source with a full URL. We need a host,
-    // not just a port — QGC takes the URI literally, so "rtsp://:8554/…"
-    // breaks any working stream the operator set manually.
-    std::string rover_ip = rover_ip_for_peer(state.qgc_addr, state.qgc_addr_len);
-    if (!rover_ip.empty()) {
-        std::snprintf(info.uri, sizeof(info.uri), "rtsp://%s:%u%s-%d",
-                      rover_ip.c_str(), Config::RTSP_PORT,
-                      Config::RTSP_MOUNT_PREFIX, mode_idx + 1);
+    if (state.video_transport == 1) {
+        // UDP push: QGC listens on its end. udp://@:PORT means "any source".
+        std::snprintf(info.uri, sizeof(info.uri), "udp://@:%u",
+                      Config::UDP_VIDEO_PORT);
     } else {
-        // IP unknown (rare — requires no MAVLink peer seen yet). Leave uri
-        // empty so QGC falls back to the operator's manual config.
-        info.uri[0] = '\0';
+        // RTSP: auto-configure QGC's video source with a full URL. We need
+        // a host, not just a port — QGC takes the URI literally, so
+        // "rtsp://:8554/…" breaks any working stream the operator set manually.
+        std::string rover_ip = rover_ip_for_peer(state.qgc_addr, state.qgc_addr_len);
+        if (!rover_ip.empty()) {
+            std::snprintf(info.uri, sizeof(info.uri), "rtsp://%s:%u%s-%d",
+                          rover_ip.c_str(), Config::RTSP_PORT,
+                          Config::RTSP_MOUNT_PREFIX, mode_idx + 1);
+        } else {
+            // IP unknown (rare — requires no MAVLink peer seen yet). Leave
+            // uri empty so QGC falls back to the operator's manual config.
+            info.uri[0] = '\0';
+        }
     }
 
     mavlink_message_t msg;
@@ -270,7 +283,8 @@ void MavSender::send_video_stream_status(uint8_t cam_comp_id, const RoverState& 
     status.framerate    = std::min(static_cast<float>(state.video_fps), mode.fps);
     status.resolution_h = mode.width;
     status.resolution_v = mode.height;
-    status.bitrate      = state.video_bitrate_bps;
+    status.bitrate      = (mode_idx < Config::MAX_VIDEO_BITRATE_PARAMS)
+                          ? state.per_mode_bitrate_bps[mode_idx] : 0;
     status.rotation     = 0;
     status.hfov         = 0;
 

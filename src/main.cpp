@@ -16,7 +16,10 @@
 #include "mavlink/command_handlers.hpp"
 #include "mavlink/camera_handlers.hpp"
 #include "camera/camera_discovery.hpp"
-#include "video/rtsp_server.hpp"
+#include "video/video_backend.hpp"
+#include "video/rtsp_backend.hpp"
+#include "video/udp_backend.hpp"
+#include <memory>
 #include "drive/diff_drive.hpp"
 #include "motor/uart_motor_driver.hpp"
 #ifdef DRIVER_TB6612
@@ -98,47 +101,62 @@ int main()
 #endif
     // Camera discovery — runs libcamera-hello --list-cameras at startup
     state.cameras = discover_cameras();
-    state.video_bitrate_bps = static_cast<uint32_t>(params.get(5));
-    state.video_fps         = static_cast<uint32_t>(params.get(6));
+    // Param indices 8-11: per-mode bitrates VIDEO_BITRATE_1..4
+    static constexpr int VIDEO_BITRATE_PARAM_BASE = 8;
 
-    // Param indices 9-12: per-mode bitrates VIDEO_BITRATE_1..4
-    static constexpr int VIDEO_BITRATE_PARAM_BASE = 9;
+    auto refresh_video_state = [&]() {
+        state.video_fps       = static_cast<uint32_t>(params.get(5));
+        state.video_transport = static_cast<uint8_t>(params.get(12));
+        for (int i = 0; i < Config::MAX_VIDEO_BITRATE_PARAMS; ++i) {
+            state.per_mode_bitrate_bps[i] =
+                static_cast<uint32_t>(params.get(VIDEO_BITRATE_PARAM_BASE + i));
+        }
+    };
+    refresh_video_state();
 
-    auto build_rtsp_streams = [&]() -> std::vector<RtspServer::Stream> {
-        std::vector<RtspServer::Stream> streams;
+    auto build_streams = [&]() -> std::vector<VideoStream> {
+        std::vector<VideoStream> streams;
         if (state.cameras.empty() || state.cameras[0].modes.empty())
             return streams;
         const CameraInfo& cam = state.cameras[0];
-        streams.reserve(cam.modes.size());
-        for (size_t i = 0; i < cam.modes.size(); ++i) {
+        // Cap at MAX_VIDEO_BITRATE_PARAMS — modes beyond that have no bitrate
+        // slot and shouldn't be advertised as separate streams.
+        size_t mode_count = std::min(cam.modes.size(),
+                                     static_cast<size_t>(Config::MAX_VIDEO_BITRATE_PARAMS));
+        streams.reserve(mode_count);
+        for (size_t i = 0; i < mode_count; ++i) {
             const SensorMode& mode = cam.modes[i];
             int fps     = static_cast<int>(state.video_fps);
             int max_fps = static_cast<int>(mode.fps);
             if (fps > max_fps) fps = max_fps;
-            // Use per-mode bitrate if available (indices 9-12), else fall back to VIDEO_BITRATE
-            int param_idx = VIDEO_BITRATE_PARAM_BASE + static_cast<int>(i);
-            uint32_t bps = (param_idx < ParamStore::COUNT)
-                           ? static_cast<uint32_t>(params.get(param_idx))
-                           : state.video_bitrate_bps;
             char mount[32];
             std::snprintf(mount, sizeof(mount), "%s-%zu",
                           Config::RTSP_MOUNT_PREFIX, i + 1);
-            streams.push_back({mount, mode.width, mode.height, fps, bps});
+            streams.push_back({mount, mode.width, mode.height, fps,
+                               state.per_mode_bitrate_bps[i]});
         }
         return streams;
     };
 
-    // Embedded RTSP server — clients pull from rtsp://<rover>:8554/stream-N
-    // (N = 1-indexed sensor mode). One mount per resolution gives QGC's
-    // "gear" video-source dropdown a stream to switch between. libcamerasrc
-    // is exclusive, so only one mount has an active pipeline at a time;
-    // the switch costs ~1-2 s for camera release + reopen.
-    RtspServer rtsp;
-    if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
-        rtsp.start(Config::RTSP_PORT, build_rtsp_streams());
-    } else {
-        logger::line("[rtsp] no camera detected — server not started");
-    }
+    // Active video backend, swapped on VIDEO_TRANSPORT changes.
+    std::unique_ptr<VideoBackend> backend;
+    auto rebuild_backend = [&]() {
+        if (backend) backend->stop();
+        backend.reset();
+        if (state.cameras.empty() || state.cameras[0].modes.empty()) {
+            logger::line("[video] no camera detected — backend not started");
+            return;
+        }
+        if (state.video_transport == 1) {
+            logger::line("[video] transport: UDP push → :%u", Config::UDP_VIDEO_PORT);
+            backend = std::make_unique<UdpBackend>(state, Config::UDP_VIDEO_PORT);
+        } else {
+            logger::line("[video] transport: RTSP server :%u", Config::RTSP_PORT);
+            backend = std::make_unique<RtspBackend>(Config::RTSP_PORT);
+        }
+        backend->start(build_streams());
+    };
+    rebuild_backend();
 
     DriveSlew slew{};
     uint64_t last_mc_us        = 0;
@@ -198,12 +216,22 @@ int main()
                 mav.send_statustext(state, MAV_SEVERITY_INFO, banner);
                 if (!state.cameras.empty() && !state.cameras[0].modes.empty()) {
                     char stxt[64];
-                    std::snprintf(stxt, sizeof(stxt),
-                                  "RTSP :%u%s-{1..%zu}",
-                                  Config::RTSP_PORT, Config::RTSP_MOUNT_PREFIX,
-                                  state.cameras[0].modes.size());
+                    if (state.video_transport == 1) {
+                        std::snprintf(stxt, sizeof(stxt), "UDP push :%u",
+                                      Config::UDP_VIDEO_PORT);
+                    } else {
+                        std::snprintf(stxt, sizeof(stxt),
+                                      "RTSP :%u%s-{1..%zu}",
+                                      Config::RTSP_PORT, Config::RTSP_MOUNT_PREFIX,
+                                      state.cameras[0].modes.size());
+                    }
                     mav.send_statustext(state, MAV_SEVERITY_INFO, stxt);
                 }
+                // UDP backend can't push until it has a destination IP; the
+                // first QGC packet just gave us one. Autostart at lowest mode
+                // (matches the pre-RTSP UX). RTSP backend ignores this.
+                if (backend && state.video_transport == 1)
+                    backend->start_stream(1);
                 banner_sent = true;
             }
             for (ssize_t i = 0; i < n; i++) {
@@ -299,7 +327,7 @@ int main()
                                     cam_idx = 0;
                             }
                             if (cam_idx >= 0)
-                                handle_camera_command_long(mav, state, &cmd, cam_idx);
+                                handle_camera_command_long(mav, state, backend.get(), &cmd, cam_idx);
                             else
                                 handle_command_long(mav, state, &cmd);
                             break;
@@ -367,22 +395,25 @@ int main()
                                 params.save(Config::PARAM_FILE);
                                 mav.send_param(state, params.name(idx), params.get(idx),
                                                static_cast<uint16_t>(idx), ParamStore::COUNT);
-                                bool rtsp_restart = false;
-                                if (std::strncmp(params.name(idx), "VIDEO_FPS", 16) == 0) {
-                                    state.video_fps = static_cast<uint32_t>(params.get(idx));
-                                    rtsp_restart = true;
+                                bool video_restart  = false;
+                                bool transport_swap = false;
+                                const char* pname   = params.name(idx);
+                                if (std::strncmp(pname, "VIDEO_FPS", 16) == 0 ||
+                                    std::strncmp(pname, "VIDEO_BITRATE_", 14) == 0) {
+                                    refresh_video_state();
+                                    video_restart = true;
                                 }
-                                if (std::strncmp(params.name(idx), "VIDEO_BITRATE", 13) == 0) {
-                                    // matches VIDEO_BITRATE (deprecated fallback) and VIDEO_BITRATE_1..4
-                                    if (idx == 5)
-                                        state.video_bitrate_bps = static_cast<uint32_t>(params.get(idx));
-                                    rtsp_restart = true;
+                                if (std::strncmp(pname, "VIDEO_TRANSPORT", 16) == 0) {
+                                    refresh_video_state();
+                                    transport_swap = true;
                                 }
-                                if (rtsp_restart && !state.cameras.empty() &&
-                                    !state.cameras[0].modes.empty()) {
-                                    logger::line("[rtsp] param changed — restarting server");
-                                    rtsp.stop();
-                                    rtsp.start(Config::RTSP_PORT, build_rtsp_streams());
+                                if (transport_swap) {
+                                    logger::line("[video] transport changed — swapping backend");
+                                    rebuild_backend();
+                                } else if (video_restart && backend) {
+                                    logger::line("[video] param changed — restarting backend");
+                                    backend->stop();
+                                    backend->start(build_streams());
                                 }
 #ifdef LTE_USB
                                 if (std::strncmp(params.name(idx), "NET_LINK_PREF", 16) == 0) {
@@ -456,7 +487,7 @@ int main()
                 lte_baseline_set = false;
             }
 
-            int step_mb = static_cast<int>(params.get(8));
+            int step_mb = static_cast<int>(params.get(7));
             if (step_mb > 0) {
                 uint64_t step_bytes =
                     static_cast<uint64_t>(step_mb) * 1000ULL * 1000ULL;
@@ -523,7 +554,7 @@ int main()
             // Auto-fallback: WiFi preferred but wpa_supplicant lost association
             // (wpa_cli signal_poll returns FAIL → wifi_rssi_dbm stays 0 in status server).
             // After 3 consecutive polls (~15 s) with no WiFi signal, switch to LTE.
-            if (static_cast<int>(params.get(7)) == 1 &&
+            if (static_cast<int>(params.get(6)) == 1 &&
                 ::strncmp(state.lte.uplink, "wifi", 4) == 0 &&
                 state.lte.wifi_rssi_dbm == 0 &&
                 state.lte.connected) {
@@ -533,7 +564,7 @@ int main()
                     if (state.qgc_known)
                         mav.send_statustext(state, MAV_SEVERITY_WARNING,
                                             "Link: WiFi lost, LTE fallback");
-                    params.set(7, 0.0f);
+                    params.set(6, 0.0f);
                     params.save(Config::PARAM_FILE);
                     wifi_drop_polls = 0;
                 }
@@ -599,6 +630,8 @@ int main()
             state.lte_was_connected = state.lte.connected;
         }
 
+        if (backend) backend->tick();
+
         if (now - last_hb > Config::HEARTBEAT_INTERVAL_US) {
             mav.send_heartbeat(state);
             mav.send_sys_status(state);
@@ -614,5 +647,5 @@ int main()
         }
     }
 
-    rtsp.stop();
+    if (backend) backend->stop();
 }
