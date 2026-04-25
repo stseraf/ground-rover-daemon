@@ -2,7 +2,12 @@
 
 H.264 RTP video from a MIPI camera on the Pi to QGroundControl. Each camera appears as a separate MAVLink camera component; each sensor mode is advertised as a stream. QGC starts / stops streams via `MAV_CMD_VIDEO_START_STREAMING`.
 
-Implementation: [`src/camera/`](../../src/camera/) + [`src/mavlink/camera_handlers.cpp`](../../src/mavlink/camera_handlers.cpp).
+Two transports are supported and switchable at runtime via the [`VIDEO_TRANSPORT`](#video-transports) param:
+
+- **RTSP server (default, `VIDEO_TRANSPORT=0`)**: Pi runs `gst-rtsp-server`; QGC pulls from `rtsp://<rover>:8554/stream-N`. Lower latency but smaller QGC-side jitter buffer — motion-induced macroblock corruption shows up more easily on lossy links.
+- **UDP push (`VIDEO_TRANSPORT=1`)**: Pi spawns `gst-launch` and pushes RTP/H.264 to `udp://<qgc>:5600`. Higher latency (~200 ms QGC jitter buffer) but absorbs packet loss / reorder more gracefully.
+
+Implementation: [`src/video/`](../../src/video/) + [`src/mavlink/camera_handlers.cpp`](../../src/mavlink/camera_handlers.cpp).
 
 ---
 
@@ -14,18 +19,21 @@ QGC
 Pi daemon
   ├── heartbeat per camera component (MAV_COMP_ID_CAMERA..+i)
   ├── CameraDiscovery — parses `libcamera-hello --list-cameras`
-  ├── GstPipeline — fork/exec gst-launch-1.0, killpg on stop
-  └── stream watchdog — restart pipeline if it exits unexpectedly
-      ↓
-   gst-launch-1.0 libcamerasrc ! … ! v4l2h264enc ! rtph264pay ! udpsink
-      ↓ H.264 RTP @ UDP 5600
-   QGC video widget
+  └── VideoBackend (one of):
+        ├── RtspBackend → gst-rtsp-server, registers a mount per sensor mode
+        │     ↓ pipeline runs while a client is connected
+        │   rtsp://<rover>:8554/stream-N  (QGC pulls)
+        └── UdpBackend  → fork/exec gst-launch, killpg on stop, watchdog restart
+              ↓ pipeline runs after MAV_CMD_VIDEO_START_STREAMING
+            udp://<qgc>:5600  (rover pushes RTP/H.264)
 ```
 
 - Each camera is advertised as its own MAVLink component (`MAV_COMP_ID_CAMERA + i`).
 - Each sensor mode from the camera is its own `VIDEO_STREAM_INFORMATION` (stream IDs start at 1).
+- `VIDEO_STREAM_INFORMATION.type` is `RTSP` or `RTPUDP` depending on `VIDEO_TRANSPORT`.
 - `COMMAND_LONG` is routed by `target_component`: components ≥ 100 go to camera handlers, component 1 is the autopilot.
-- Start / stop / watchdog-restart events are reported to QGC as `STATUSTEXT`.
+- `MAV_CMD_VIDEO_START/STOP_STREAMING` are forwarded to the active backend (RTSP no-ops them; UDP spawns/kills the pipeline).
+- Backend swaps mid-flight on `VIDEO_TRANSPORT` PARAM_SET — old backend stopped, new one constructed and started in one main-loop iteration.
 
 See [../reference/mavlink-camera-protocol.md](../reference/mavlink-camera-protocol.md) for the MAVLink protocol details.
 
@@ -50,10 +58,24 @@ Stream names sent to QGC are `"<W>x<H> <fps>fps <crop>"`, e.g. `"1296x972 46.34f
 
 | Param | Default | Range | Effect |
 |---|---|---|---|
-| `VIDEO_BITRATE` | 5 000 000 | 25 000 – 25 000 000 | H.264 encoder target bitrate (bps) |
+| `VIDEO_TRANSPORT` | 0 | 0 / 1 | 0 = RTSP server, 1 = UDP push (rover→QGC) |
+| `VIDEO_BITRATE_1`..`VIDEO_BITRATE_4` | 1.5 / 3 / 5 / 8 Mbps | 25 000 – 25 000 000 | Per-mode H.264 encoder target bitrate (bps); index = sensor mode index |
+| `VIDEO_BITRATE` | 5 000 000 | 25 000 – 25 000 000 | Deprecated single-bitrate fallback for modes without a per-mode value |
 | `VIDEO_FPS` | 30 | 1 – 60 | Frame rate cap; lowered when the sensor mode's max fps is lower |
 
-Change live from QGC; the running pipeline is restarted with the new setting.
+Change any of these live from QGC; the active backend is restarted with the new setting. Switching `VIDEO_TRANSPORT` swaps the backend entirely (stop current → construct new → start).
+
+### Video transports
+
+| | RTSP (default) | UDP push |
+|---|---|---|
+| Direction | QGC pulls (client connects to `rtsp://<rover>:8554/stream-N`) | Rover pushes (sends to `udp://<qgc>:5600`) |
+| QGC IP discovery | Not needed (QGC dials in) | Auto-learned from MAVLink source IP — no manual config |
+| Latency | ~120-140 ms baseline + QGC ~300 ms decode/jitter buffer | Same baseline + QGC ~200 ms raw-UDP jitter buffer (lower variability) |
+| Stability under packet loss | Smaller QGC jitter buffer → motion artifacts surface | Larger jitter buffer absorbs loss/reorder; visibly more stable picture |
+| Stream selection (QGC gear dropdown) | Each mode is a distinct mount URL | Each mode is a stream_id; switching kills/respawns the pipeline |
+| Idle cost | Zero (pipeline only runs while a client is connected) | Pipeline only runs after `VIDEO_START_STREAMING`; QGC sends this on connect |
+| When to prefer | Dev / LAN — lowest latency wins | LTE / lossy links — stable picture wins |
 
 ---
 
@@ -73,37 +95,35 @@ The lowest resolution (640 × 480) is chosen for autostart because it is the che
 
 ---
 
-## QGC IP detection and the `qgc_ip` file
+## QGC IP detection (UDP-push only)
 
-The GStreamer pipeline sends H.264 RTP to `udp://<QGC-IP>:5600`. The daemon learns the QGC IP from the source address of the first MAVLink packet it receives. Through WireGuard this is normally QGC's LAN IP, which is correct.
+The UDP-push transport sends RTP/H.264 to `udp://<QGC-IP>:5600`. The daemon learns the QGC IP from the source address of the first MAVLink packet — `recvfrom()` populates it for free, no QGC-side configuration needed. The learned address is logged at first contact (`[udp] pid N started → <ip>:5600 ...`).
 
-If video never starts but MAVLink is connected, the IP detection may have misfired (e.g., the first packet came from a different source). Override with the `qgc_ip` file:
-
-```bash
-echo "192.168.50.46" > /home/pi/ground-rover-daemon/qgc_ip
-sudo systemctl restart ground-rover-daemon
-```
-
-Use the **local LAN IP of the QGC machine** (not its WireGuard IP) — the Pi routes home-LAN traffic through the WireGuard tunnel, so `udpsink` can reach it. How to find it:
-
-| OS | Command |
-|---|---|
-| macOS | `System Settings → Network` or `ifconfig \| grep "inet "` in Terminal |
-| Linux | `ip addr show` or `hostname -I` |
-| Windows | `ipconfig` in cmd |
-
-The file holds one IP with no port. It is read once at daemon startup. Remove it to revert to auto-detection.
+The RTSP transport doesn't need this — clients dial in and the rover only needs to know its own listen port.
 
 ---
 
 ## The GStreamer pipeline
 
-For 1296 × 972 the daemon spawns:
+Both transports use the same encoder + payloader; only the sink differs.
+
+**RTSP server (factory pipeline registered per mount):**
+
+```
+libcamerasrc !
+  video/x-raw,width=W,height=H,framerate=F/1 !
+  v4l2h264enc extra-controls="controls,repeat_sequence_header=1,video_bitrate=B" !
+  video/x-h264,level=(string)4 !
+  h264parse config-interval=-1 !
+  rtph264pay config-interval=1 pt=96 mtu=1400 name=pay0
+```
+
+**UDP push (forked `gst-launch`):**
 
 ```bash
 gst-launch-1.0 libcamerasrc ! \
-  video/x-raw,width=1296,height=972,framerate=30/1 ! \
-  v4l2h264enc extra-controls="controls,repeat_sequence_header=1,video_bitrate=5000000" ! \
+  video/x-raw,width=W,height=H,framerate=F/1 ! \
+  v4l2h264enc extra-controls="controls,repeat_sequence_header=1,video_bitrate=B" ! \
   video/x-h264,level=(string)4 ! \
   h264parse config-interval=-1 ! \
   rtph264pay config-interval=1 pt=96 mtu=1400 ! \

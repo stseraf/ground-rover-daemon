@@ -12,6 +12,31 @@ ARCH    ?= host
 ifeq ($(ARCH),rpi)
   CXX      = aarch64-linux-gnu-g++
   CXXFLAGS += -march=armv8-a
+  # Inline the env on every pkg-config invocation — `export` in Makefile
+  # scope doesn't always reach $(shell …) at parse time. Paths come from
+  # libgstrtspserver-1.0-dev:arm64 + libgstreamer1.0-dev:arm64 inside the
+  # xbuild container.
+  PKG_CFG := PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig \
+             PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig \
+             PKG_CONFIG_SYSROOT_DIR=/ \
+             pkg-config
+else
+  PKG_CFG := pkg-config
+endif
+
+# VIDEO=rtsp (default, embedded RTSP server; needs libgstrtspserver-1.0-dev)
+# VIDEO=none (no video; for local sanity builds without gst deps)
+VIDEO   ?= rtsp
+ifeq ($(VIDEO),rtsp)
+  # Swallow stderr: the host parses this Makefile when running `make xbuild`
+  # even though only the container will use the values. Missing arm64 gst
+  # deps on the host are expected and not an error. If compilation actually
+  # needs these flags and they're missing, g++ fails with a clear "gst.h
+  # not found" anyway.
+  GST_CFLAGS := $(shell $(PKG_CFG) --cflags gstreamer-1.0 gstreamer-rtsp-server-1.0 2>/dev/null)
+  GST_LIBS   := $(shell $(PKG_CFG) --libs   gstreamer-1.0 gstreamer-rtsp-server-1.0 2>/dev/null)
+  CXXFLAGS   += $(GST_CFLAGS)
+  LDLIBS     += $(GST_LIBS)
 endif
 
 # DRIVER=stub (default, no deps) or DRIVER=tb6612 (sysfs GPIO + PWM, no external libs)
@@ -44,7 +69,16 @@ SRCS = src/main.cpp \
        src/mavlink/command_handlers.cpp \
        src/mavlink/camera_handlers.cpp \
        src/camera/camera_discovery.cpp \
-       src/camera/gst_pipeline.cpp
+       src/video/rtsp_backend.cpp \
+       src/video/udp_backend.cpp
+
+ifeq ($(VIDEO),rtsp)
+  SRCS += src/video/rtsp_server.cpp
+else ifeq ($(VIDEO),none)
+  SRCS += src/video/rtsp_server_stub.cpp
+else
+  $(error Unknown VIDEO=$(VIDEO). Use VIDEO=rtsp or VIDEO=none)
+endif
 
 ifeq ($(DRIVER),tb6612)
   SRCS += src/motor/tb6612_driver.cpp
@@ -67,6 +101,7 @@ HEADERS = $(wildcard include/*.hpp) \
           $(wildcard src/*.hpp) \
           $(wildcard src/mavlink/*.hpp) \
           $(wildcard src/camera/*.hpp) \
+          $(wildcard src/video/*.hpp) \
           $(wildcard src/drive/*.hpp) \
           $(wildcard src/motor/*.hpp) \
           $(wildcard src/gimbal/*.hpp) \
@@ -81,15 +116,30 @@ build:
 	mkdir -p build
 
 $(TARGET): $(SRCS) $(HEADERS)
-	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS) LTE=$(LTE)]"
-	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS)
+	@echo "  CXX  $@  [ARCH=$(ARCH) DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS) LTE=$(LTE) VIDEO=$(VIDEO)]"
+	$(CXX) $(CXXFLAGS) $(SRCS) -o $(TARGET) $(INC) $(LDFLAGS) $(LDLIBS)
 
 rebuild: clean all
 
+# Cross-compile for the Pi inside a throwaway Debian container — keeps arm64
+# dev libs off the host (Ubuntu multiarch + these specific gst packages will
+# nuke your desktop, learned the hard way). Pi OS Bookworm matches the
+# container ABI, so the binary runs unchanged on the Pi.
+# First build takes ~60 s (pulls base image + apt); subsequent builds are
+# instant (Docker caches the apt layer).
+# Usage: make xbuild [DRIVER=tb6612 GIMBAL=i2c GPS=nmea LTE=usb VIDEO=rtsp]
+XBUILD_IMAGE := rover-xbuild
+xbuild:
+	@docker build -q -t $(XBUILD_IMAGE) deploy/xbuild/ >/dev/null
+	docker run --rm -v $(CURDIR):/src -u $$(id -u):$$(id -g) $(XBUILD_IMAGE) \
+	    make rebuild ARCH=rpi DRIVER=$(DRIVER) GIMBAL=$(GIMBAL) GPS=$(GPS) LTE=$(LTE) VIDEO=$(VIDEO)
+
 # Deploy to RPi: make deploy [RPI=pi@pi-rover.lan]
+# Build step runs inside the xbuild container; ssh/scp run on the host so
+# your keys / ssh-agent / ~/.ssh/config work normally.
 RPI ?= pi@pi-rover.lan
 deploy:
-	$(MAKE) rebuild ARCH=rpi DRIVER=tb6612 GPS=nmea LTE=usb
+	$(MAKE) xbuild DRIVER=tb6612 GPS=nmea LTE=usb VIDEO=rtsp
 	ssh $(RPI) "mkdir -p /home/pi/ground-rover-daemon && sudo systemctl stop ground-rover-daemon || true"
 	scp $(TARGET) $(RPI):/home/pi/ground-rover-daemon/
 	scp deploy/ground-rover-daemon.service $(RPI):/tmp/
@@ -174,4 +224,4 @@ setup-wireguard:
 clean:
 	rm -rf build
 
-.PHONY: all build rebuild deploy deploy-modem _deploy-modem-push verify-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu setup-wireguard clean
+.PHONY: all build rebuild xbuild deploy deploy-modem _deploy-modem-push verify-modem setup-pi-usb setup-modem-wifi remove-modem-wifi modem-cpu setup-wireguard clean
