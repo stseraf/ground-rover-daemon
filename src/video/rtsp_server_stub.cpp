@@ -17,5 +17,6 @@ bool RtspServer::start(uint16_t port, const std::vector<Stream>& streams)
 }
 
 void RtspServer::stop() {}
+void RtspServer::disconnect_all_clients() {}
 
 void* RtspServer::thread_main(void*) { return nullptr; }

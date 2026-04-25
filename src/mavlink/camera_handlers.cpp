@@ -172,9 +172,17 @@ void handle_camera_command_long(MavSender& mav, RoverState& state,
             break;
 
         case MAV_CMD_RESET_CAMERA_SETTINGS:
-            logger::line("rx: RESET_CAMERA_SETTINGS(529) cam=%d", cam_idx);
+            // QGC's "Reset camera defaults" button maps to this. UX expectation
+            // (carried over from the UDP-push era): the active stream stops.
+            // For UDP this kills the gst-launch subprocess; for RTSP this
+            // force-disconnects all connected clients to release the camera.
+            logger::line("rx: RESET_CAMERA_SETTINGS(529) cam=%d — stopping stream", cam_idx);
             mav.send_command_ack_cam(cc, state, cmd->command, MAV_RESULT_ACCEPTED,
                                      cmd->target_system, cmd->target_component);
+            if (backend) {
+                backend->stop_stream();
+                mav.send_statustext(state, MAV_SEVERITY_INFO, "Video stream stopped");
+            }
             break;
 
         default:

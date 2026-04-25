@@ -46,6 +46,12 @@ public:
     // a signal-handler context — uses g_main_loop_quit() which is thread-safe.
     void stop();
 
+    // Force-disconnect every connected RTSP client. The set_shared(TRUE)
+    // factory keeps libcamerasrc open while at least one client is
+    // attached, so this is the only way to release the camera without
+    // tearing the whole server down. Thread-safe (filter takes a lock).
+    void disconnect_all_clients();
+
 private:
     static void* thread_main(void* self);
 
